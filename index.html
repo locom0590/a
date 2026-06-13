@@ -16,7 +16,6 @@
             width: 100vw;
             height: 100vh;
         }
-        /* VR Bölme Çizgisi (Gözlerin hizalanması için opsiyonel hafif referans çizgisi) */
         #vr-divider {
             position: absolute;
             left: 50%;
@@ -28,7 +27,6 @@
             pointer-events: none;
             display: none;
         }
-        /* VR Modunda UI ekranın her iki tarafında da görünmeli (Sol ve Sağ Göz için ikiz UI) */
         .ui-side {
             position: absolute;
             top: 20px;
@@ -40,7 +38,7 @@
             letter-spacing: 1px;
             pointer-events: none;
             z-index: 10;
-            display: none; /* Oyun başlayınca açılacak */
+            display: none;
         }
         #ui-left { left: 4%; }
         #ui-right { left: 54%; }
@@ -66,7 +64,6 @@
             height: 100%;
             background: #8fa89b;
         }
-        /* VR Başlatma Butonu */
         #start-btn {
             position: absolute;
             bottom: 40px;
@@ -105,7 +102,6 @@
     <div id="canvas-container"></div>
 
     <script>
-        // --- OYUN AYARLARI VE DEĞİŞKENLER ---
         let scene, camera, renderer, stereoEffect;
         let airplane, propeller;
         let pathPoints = [];
@@ -119,7 +115,11 @@
         
         let targetPitch = 0, targetRoll = 0;
         let currentPitch = 0, currentRoll = 0;
-        const lerpFactor = 0.05; 
+        
+        // DÜZELTME 3: Hareket keskinliğini azaltmak için LERP sönümleme katsayısını 0.05'ten 0.02'ye düşürdük (Çok daha yumuşak)
+        const lerpFactor = 0.02; 
+        
+        let wakeLock = null; // Ekran kapanmasını önleme objesi
 
         const colors = {
             skyDay: 0xcfe0e8,
@@ -136,7 +136,7 @@
         const container = document.getElementById('canvas-container');
         const startBtn = document.getElementById('start-btn');
 
-        startBtn.addEventListener('click', () => {
+        startBtn.addEventListener('click', async () => {
             initPermissions();
             startBtn.style.display = 'none';
             document.getElementById('vr-divider').style.display = 'block';
@@ -145,18 +145,29 @@
             gameActive = true;
             initAudio(); 
             
-            // Telefonlarda tam ekran modunu tetikle (VR Box deneyimi için en iyisi)
+            // DÜZELTME 2: Ekran kapanmasını engelleme (Wake Lock) aktif ediliyor
+            requestWakeLock();
+
             if (document.documentElement.requestFullscreen) {
                 document.documentElement.requestFullscreen();
             }
         });
 
-        // --- STEREOSCOPIC EFFECT (EKRANI İKİYE BÖLME ALGORİTMASI) ---
-        // Three.js'in standart StereoEffect sınıfını manuel olarak simüle ediyoruz (Harici dosya bağımlılığını azaltmak için)
+        // DÜZELTME 2 İÇİN YARDIMCI FONKSİYON: Ekran uykusunu kilitleme
+        async function requestWakeLock() {
+            try {
+                if ('wakeLock' in navigator) {
+                    wakeLock = await navigator.wakeLock.request('screen');
+                }
+            } catch (err) {
+                console.log(`Wake Lock aktif edilemedi: ${err.message}`);
+            }
+        }
+
         class CustomStereoEffect {
             constructor(renderer) {
                 this.stereo = new THREE.StereoCamera();
-                this.stereo.aspect = 0.5; // Ekran ikiye bölündüğü için her gözün aspect ratio'su yarıya düşer
+                this.stereo.aspect = 0.5; 
                 this.renderer = renderer;
             }
 
@@ -169,13 +180,11 @@
                 const size = new THREE.Vector2();
                 this.renderer.getSize(size);
 
-                // Sol Göz Çizimi
                 this.renderer.setScissorTest(true);
                 this.renderer.setScissor(0, 0, size.x / 2, size.y);
                 this.renderer.setViewport(0, 0, size.x / 2, size.y);
                 this.renderer.render(scene, this.stereo.cameraL);
 
-                // Sağ Göz Çizimi
                 this.renderer.setScissor(size.x / 2, 0, size.x / 2, size.y);
                 this.renderer.setViewport(size.x / 2, 0, size.x / 2, size.y);
                 this.renderer.render(scene, this.stereo.cameraR);
@@ -196,7 +205,6 @@
             renderer.setSize(window.innerWidth, window.innerHeight);
             container.appendChild(renderer.domElement);
 
-            // Ekranı ikiye bölecek olan stereo efekti başlatıyoruz
             stereoEffect = new CustomStereoEffect(renderer);
 
             const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
@@ -210,13 +218,13 @@
             generateProceduralPath();
             createEnvironment();
 
-            camera.position.set(0, 5, 15);
+            // DÜZELTME 1: Kamerayı uçağın arkasına (Z ekseninde pozitif tarafa) konumlandırıyoruz
+            camera.position.set(0, 4.5, 12); 
             window.addEventListener('resize', onWindowResize);
 
             animate();
         }
 
-        // --- LOW-POLY UÇAK ---
         function createAirplane() {
             airplane = new THREE.Group();
 
@@ -229,25 +237,27 @@
             const wingGeo = new THREE.BoxGeometry(6, 0.08, 1.0);
             const wingMat = new THREE.MeshLambertMaterial({ color: colors.planeWing });
             
+            // DÜZELTME 1: Kanatların yönünü uçağın yeni arkadan görünüş açısına göre hizaladık
             const topWing = new THREE.Mesh(wingGeo, wingMat);
-            topWing.position.set(0, 0.6, 0.3);
+            topWing.position.set(0, 0.6, -0.3);
             
             const bottomWing = new THREE.Mesh(wingGeo, wingMat);
-            bottomWing.position.set(0, -0.4, 0.3);
+            bottomWing.position.set(0, -0.4, -0.3);
             
             airplane.add(topWing, bottomWing);
 
             const propGeo = new THREE.BoxGeometry(2.0, 0.12, 0.04);
             const propMat = new THREE.MeshBasicMaterial({ color: 0x333333 });
             propeller = new THREE.Mesh(propGeo, propMat);
-            propeller.position.set(0, 0, 2.0);
+            
+            // DÜZELTME 1: Pervaneyi uçağın ön ucuna (Z ekseninde eksi yöne) yerleştirdik
+            propeller.position.set(0, 0, -2.0); 
             airplane.add(propeller);
 
             airplane.position.set(0, 8, 0);
             scene.add(airplane);
         }
 
-        // --- ROTA VE YOL ---
         function generateProceduralPath() {
             let zPos = 0;
             let xPos = 0;
@@ -255,9 +265,9 @@
             for (let i = 0; i < 600; i++) {
                 pathPoints.push(new THREE.Vector3(xPos, 0, zPos));
                 if (i > 20) {
-                    xPos += Math.sin(i * 0.06) * 2.0; // Kıvrımları belirginleştirdik
+                    xPos += Math.sin(i * 0.06) * 2.0; 
                 }
-                zPos -= 18; 
+                zPos -= 18; // Yol ileriye (eksi Z yönüne) doğru uzanıyor
             }
 
             pathPoints.forEach((point, index) => {
@@ -321,7 +331,6 @@
             scene.add(ground);
         }
 
-        // --- JİROSKOP DOĞRULAMA (VR BOX UYUMLU EKSENLER) ---
         function initPermissions() {
             if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
                 DeviceOrientationEvent.requestPermission()
@@ -335,7 +344,6 @@
                 window.addEventListener('deviceorientation', handleOrientation);
             }
 
-            // Bilgisayarda test edebilmek için yön tuşları simülasyonu
             window.addEventListener('keydown', (e) => {
                 if(e.key === "ArrowUp") targetPitch = 0.4;
                 if(e.key === "ArrowDown") targetPitch = -0.4;
@@ -348,18 +356,13 @@
         function handleOrientation(event) {
             if (!gameActive) return;
 
-            // VR Box yatay durduğu için:
-            // beta: başı yukarı/aşağı eğme (Pitch)
-            // alpha: başı sağa/sola çevirme veya gamma: yatırma (Roll)
             let pitchSource = event.beta; 
             let rollSource = event.gamma; 
 
-            // Cihazı gözlük içine yatay koyduğumuz varsayımıyla kalibrasyon
             targetPitch = (pitchSource - 60) * 0.025; 
             targetRoll = rollSource * 0.025;
         }
 
-        // --- SES SİSTEMİ ---
         let audioCtx;
         function initAudio() {
             audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -393,7 +396,6 @@
             osc.stop(audioCtx.currentTime + 0.5);
         }
 
-        // --- ANA OYUN DÖNGÜSÜ (RENDERER YERİNE STEREOEFFECT KULLANILIYOR) ---
         let clock = new THREE.Clock();
 
         function animate() {
@@ -402,31 +404,32 @@
             if (gameActive) {
                 const delta = clock.getDelta();
                 
+                // Uçak ileriye (eksi Z yönüne) doğru akıyor
                 speed = 0.8 + (180 - timeLeft) * 0.002;
                 airplane.position.z -= speed;
 
-                // Sönümleme/Yumuşatma (LERP)
                 currentPitch += (targetPitch - currentPitch) * lerpFactor;
                 currentRoll += (targetRoll - currentRoll) * lerpFactor;
 
                 airplane.position.y += currentPitch * 0.4;
                 airplane.position.x += currentRoll * 0.4;
                 
-                airplane.rotation.z = -currentRoll * 0.8;
+                // DÜZELTME 1 UYUMU: Kanat yatış estetiğini arkadan bakış açısına göre senkronize ettik
+                airplane.rotation.z = currentRoll * 0.8;
                 airplane.rotation.x = currentPitch * 0.4;
                 propeller.rotation.z += 0.5;
 
-                // Kamera takibi
+                // DÜZELTME 1: Kamera takibi uçağın arkasından takip edecek şekilde güncellendi (+10 birim arkada)
                 camera.position.x += (airplane.position.x - camera.position.x) * 0.1;
                 camera.position.y += ((airplane.position.y + 2.2) - camera.position.y) * 0.1;
                 camera.position.z = airplane.position.z + 10;
-                camera.lookAt(airplane.position.x, airplane.position.y + 0.8, airplane.position.z - 4);
+                
+                // Kamera uçağın biraz önüne doğru odaklanıyor
+                camera.lookAt(airplane.position.x, airplane.position.y + 0.8, airplane.position.z - 6);
 
-                // Gökyüzü Değişimi
                 const progress = (180 - timeLeft) / 180;
                 scene.background.lerpColors(new THREE.Color(colors.skyDay), new THREE.Color(colors.skySunset), progress);
 
-                // Benzin Kontrolü
                 fuel -= delta * 0.55;
                 const fuelBars = document.querySelectorAll('.fuel-bar');
                 fuelBars.forEach(bar => bar.style.width = `${Math.max(0, fuel)}%`);
@@ -437,7 +440,6 @@
                 updateTimer();
             }
 
-            // CRITICAL CHANGE: Standart renderer yerine ekranı ikiye bölen efektimiz sahneyi çiziyor.
             if(stereoEffect) {
                 stereoEffect.render(scene, camera);
             } else {
@@ -449,6 +451,7 @@
             const planePos = airplane.position;
 
             rings.forEach((ring, index) => {
+                // Uçak ileri gittiği için halka uçağın arkasında kalırsa (+Z tarafına geçerse) kaçırılmış sayılır
                 if (planePos.distanceTo(ring.position) < 2.0) {
                     scene.remove(ring);
                     rings.splice(index, 1);
@@ -496,8 +499,12 @@
             timeTexts.forEach(txt => txt.innerText = timeStr);
         }
 
+        // Oyun bittiğinde veya sayfa yenilendiğinde wake lock kilidini temizleme
         function gameOver(message) {
             gameActive = false;
+            if (wakeLock !== null) {
+                wakeLock.release().then(() => wakeLock = null);
+            }
             alert(`${message}\nToplam Skorunuz: ${score}`);
             window.location.reload();
         }
