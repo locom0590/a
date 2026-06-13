@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>Zen Biplane VR - Calibrated Edition</title>
+    <title>Zen Biplane VR - Retro C64 & 6DoF Edition</title>
     <style>
         html, body {
             width: 100%;
@@ -109,7 +109,6 @@
     <script>
         let scene, camera, renderer, stereoEffect;
         let airplane, propeller;
-        let pathPoints = [];
         let rings = [], fuelCans = [];
         
         let score = 0;
@@ -118,14 +117,20 @@
         let gameActive = false;
         let speed = 0.8;
         
-        let targetPitch = 0, targetRoll = 0;
-        let currentPitch = 0, currentRoll = 0;
+        // Hassas 6DoF Rotasyon Yönetimi
+        let targetPitch = 0, targetYaw = 0, targetRoll = 0;
+        let currentPitch = 0, currentYaw = 0, currentRoll = 0;
         const lerpFactor = 0.02; 
         let wakeLock = null; 
 
-        // Kalibrasyon Değişkenleri
         let initialBeta = null;
         let initialGamma = null;
+
+        // Web Audio Sentezleyicileri (Synth)
+        let audioCtx = null;
+        let motorOsc = null;
+        let motorGain = null;
+        let bgmInterval = null;
 
         const colors = {
             skyDay: 0xcfe0e8,
@@ -133,9 +138,9 @@
             fog: 0xe0d8c3,
             road: 0x4d515a, 
             sand: 0xf5f2eb, 
-            planeBody: 0x738c80, // Tonu biraz daha asil bir mat yeşile çektik
-            planeWing: 0xe3dac9, // Kemik rengi / mat fildişi
-            planeDetail: 0xaa6c5b, // Kontrast kiremit detaylar
+            planeBody: 0x738c80, 
+            planeWing: 0xe3dac9, 
+            planeDetail: 0xaa6c5b, 
             ring: 0xe8a87c, 
             fuel: 0xd9cbd3
         };
@@ -150,7 +155,6 @@
             if (docEl.requestFullscreen) { await docEl.requestFullscreen(); }
             else if (docEl.webkitRequestFullscreen) { await docEl.webkitRequestFullscreen(); }
 
-            // İlk basıldığı anki açıyı sıfır noktası almak için veriyi temizliyoruz
             initialBeta = null;
             initialGamma = null;
 
@@ -161,7 +165,10 @@
                 document.getElementById('ui-left').style.display = 'flex';
                 document.getElementById('ui-right').style.display = 'flex';
                 gameActive = true;
-                initAudio(); 
+                
+                // Sesleri Başlat
+                initAudioEngine(); 
+                
                 requestWakeLock();
             }, 500);
         });
@@ -202,10 +209,9 @@
 
             camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
             
-            renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+            renderer = new THREE.WebGLRenderer({ antialias: true });
             renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
             renderer.setSize(window.innerWidth, window.innerHeight);
-            // Gerçekçi gölgelendirme tonlaması aktifi
             renderer.outputEncoding = THREE.sRGBEncoding;
             container.appendChild(renderer.domElement);
 
@@ -214,12 +220,12 @@
             const ambientLight = new THREE.AmbientLight(0xffffff, 0.65);
             scene.add(ambientLight);
 
-            const dirLight = new THREE.DirectionalLight(0xfff5eb, 0.75); // Hafif sıcak Zen güneşi ışığı
+            const dirLight = new THREE.DirectionalLight(0xfff5eb, 0.75);
             dirLight.position.set(80, 120, 40);
             scene.add(dirLight);
 
             createAirplane();
-            generateProceduralPath();
+            generateStraightPath();
             createEnvironment();
 
             camera.position.set(0, 4.8, 11); 
@@ -228,29 +234,24 @@
             animate();
         }
 
-        // --- ESTETİK DÜZELTME: DETAYLANDIRILMIŞ ŞIK LOW-POLY UÇAK ---
         function createAirplane() {
             airplane = new THREE.Group();
 
-            // Malzeme Türleri Mat ve Yumuşak Işık Alan Phong Yapıldı
             const bodyMat = new THREE.MeshPhongMaterial({ color: colors.planeBody, flatShading: true });
             const wingMat = new THREE.MeshPhongMaterial({ color: colors.planeWing, flatShading: true });
             const detailMat = new THREE.MeshPhongMaterial({ color: colors.planeDetail, flatShading: true });
 
-            // Ana Gövde (Daha aerodinamik low-poly hatlar)
             const bodyGeo = new THREE.CylinderGeometry(0.45, 0.12, 3.8, 6);
             bodyGeo.rotateX(Math.PI / 2);
             const body = new THREE.Mesh(bodyGeo, bodyMat);
             airplane.add(body);
 
-            // Motor Kaputu (Burun detayı)
             const noseGeo = new THREE.CylinderGeometry(0.48, 0.45, 0.5, 6);
             noseGeo.rotateX(Math.PI / 2);
             const nose = new THREE.Mesh(noseGeo, detailMat);
             nose.position.set(0, 0, -1.9);
             airplane.add(nose);
 
-            // Kokpit Camı (Minimalist siyah saydam cam)
             const glassGeo = new THREE.ConeGeometry(0.25, 0.5, 4);
             glassGeo.rotateX(Math.PI / 3);
             const glassMat = new THREE.MeshBasicMaterial({ color: 0x222222 });
@@ -258,7 +259,6 @@
             glass.position.set(0, 0.45, -0.4);
             airplane.add(glass);
 
-            // Üst ve Alt Kanat Çifti
             const wingGeo = new THREE.BoxGeometry(6.2, 0.06, 0.9);
             const topWing = new THREE.Mesh(wingGeo, wingMat);
             topWing.position.set(0, 0.65, -0.2);
@@ -266,7 +266,6 @@
             bottomWing.position.set(0, -0.45, -0.2);
             airplane.add(topWing, bottomWing);
 
-            // Kanat Arası Dikey Bağlantı Direkleri (Struts)
             const strutGeo = new THREE.BoxGeometry(0.05, 1.1, 0.05);
             const leftStrut = new THREE.Mesh(strutGeo, detailMat);
             leftStrut.position.set(-2.6, 0.1, -0.2);
@@ -274,7 +273,6 @@
             rightStrut.position.x = 2.6;
             airplane.add(leftStrut, rightStrut);
 
-            // Arka Kuyruk Kanatları (Yatay ve Dikey Stabilizer)
             const tailHorGeo = new THREE.BoxGeometry(1.8, 0.04, 0.5);
             const tailHor = new THREE.Mesh(tailHorGeo, wingMat);
             tailHor.position.set(0, 0.15, 1.6);
@@ -285,7 +283,6 @@
             tailVert.position.set(0, 0.5, 1.6);
             airplane.add(tailVert);
 
-            // İki Adet Ön Tekerlek
             const wheelGeo = new THREE.CylinderGeometry(0.25, 0.25, 0.1, 6);
             wheelGeo.rotateZ(Math.PI / 2);
             const wheelMat = new THREE.MeshBasicMaterial({ color: 0x333333 });
@@ -295,7 +292,6 @@
             rightWheel.position.x = 0.6;
             airplane.add(leftWheel, rightWheel);
 
-            // Pervane Dönüş Disk Efekti (Çirkin görüntüyü kapatan yarı saydam akış hissi)
             const propBlurGeo = new THREE.CylinderGeometry(1.2, 1.2, 0.02, 8);
             propBlurGeo.rotateX(Math.PI / 2);
             const propBlurMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.25 });
@@ -303,7 +299,6 @@
             propeller.position.set(0, 0, -2.18);
             airplane.add(propeller);
 
-            // İçine merkez çapa çizgisi
             const propCoreGeo = new THREE.BoxGeometry(2.0, 0.1, 0.02);
             const propCore = new THREE.Mesh(propCoreGeo, new THREE.MeshBasicMaterial({color: 0x333333}));
             propeller.add(propCore);
@@ -312,55 +307,52 @@
             scene.add(airplane);
         }
 
-        function generateProceduralPath() {
+        // --- DÜZELTME: TAMAMEN DÜMDÜZ ASFALT YOL ---
+        function generateStraightPath() {
             let zPos = 0;
-            let xPos = 0;
+            // Sapma olmadan uçağın rotası boyunca dümdüz ilerleyen yol segmentleri
             for (let i = 0; i < 600; i++) {
-                pathPoints.push(new THREE.Vector3(xPos, 0, zPos));
-                if (i > 20) { xPos += Math.sin(i * 0.06) * 2.0; }
-                zPos -= 18; 
-            }
-            pathPoints.forEach((point, index) => {
-                if (index === pathPoints.length - 1) return;
-                const nextPoint = pathPoints[index + 1];
                 const roadGeo = new THREE.PlaneGeometry(8, 20);
-                const roadMat = new THREE.MeshLambertMaterial({ color: colors.road, side: THREE.DoubleSide });
+                const roadMat = new THREE.MeshLambertMaterial({ color: colors.road });
                 const roadSegment = new THREE.Mesh(roadGeo, roadMat);
-                roadSegment.position.copy(point).add(nextPoint).multiplyScalar(0.5);
-                roadSegment.lookAt(nextPoint);
-                roadSegment.rotateX(Math.PI / 2);
+                
+                roadSegment.position.set(0, 0, zPos);
+                roadSegment.rotateX(-Math.PI / 2);
                 scene.add(roadSegment);
 
                 const sandMat = new THREE.MeshLambertMaterial({ color: colors.sand });
                 const leftSand = new THREE.Mesh(new THREE.PlaneGeometry(1.5, 20), sandMat);
-                leftSand.position.copy(roadSegment.position);
-                leftSand.rotation.copy(roadSegment.rotation);
-                leftSand.translateX(-4.75); 
+                leftSand.position.set(-4.75, 0, zPos);
+                leftSand.rotateX(-Math.PI / 2);
                 scene.add(leftSand);
 
                 const rightSand = leftSand.clone();
-                rightSand.translateX(9.5); 
+                rightSand.position.x = 4.75;
                 scene.add(rightSand);
 
-                if (index % 4 === 0 && index > 4) { spawnGameplayElements(roadSegment.position); }
-            });
+                if (i % 4 === 0 && i > 4) { 
+                    spawnGameplayElements(zPos); 
+                }
+                zPos -= 18; 
+            }
         }
 
-        function spawnGameplayElements(pos) {
+        function spawnGameplayElements(zPos) {
             const randomY = 4 + Math.random() * 9; 
-            const randomX = pos.x + (Math.random() - 0.5) * 6;
+            const randomX = (Math.random() - 0.5) * 6; // Yol eksenine göre simetrik yayılım
+
             if (Math.random() > 0.25) {
                 const ringGeo = new THREE.TorusGeometry(1.6, 0.12, 8, 16);
                 const ringMat = new THREE.MeshLambertMaterial({ color: colors.ring });
                 const ring = new THREE.Mesh(ringGeo, ringMat);
-                ring.position.set(randomX, randomY, pos.z);
+                ring.position.set(randomX, randomY, zPos);
                 scene.add(ring);
                 rings.push(ring);
             } else {
                 const fuelGeo = new THREE.CylinderGeometry(0.4, 0.4, 1.0, 5);
                 const fuelMat = new THREE.MeshLambertMaterial({ color: colors.fuel });
                 const fuelCan = new THREE.Mesh(fuelGeo, fuelMat);
-                fuelCan.position.set(randomX, randomY, pos.z);
+                fuelCan.position.set(randomX, randomY, zPos);
                 scene.add(fuelCan);
                 fuelCans.push(fuelCan);
             }
@@ -382,67 +374,107 @@
                         if (permissionState === 'granted') { window.addEventListener('deviceorientation', handleOrientation); }
                     }).catch(console.error);
             } else { window.addEventListener('deviceorientation', handleOrientation); }
-
-            window.addEventListener('keydown', (e) => {
-                if(e.key === "ArrowUp") targetPitch = 0.4;
-                if(e.key === "ArrowDown") targetPitch = -0.4;
-                if(e.key === "ArrowLeft") targetRoll = -0.5;
-                if(e.key === "ArrowRight") targetRoll = 0.5;
-            });
-            window.addEventListener('keyup', () => { targetPitch = 0; targetRoll = 0; });
         }
 
-        // PROBLEMIN ÇÖZÜMÜ: Otomatik Başlangıç Kalibrasyon Algoritması
+        // --- İSTEDİĞİN SENTEZLENMİŞ 6DoF KONTROL ŞEMASI ---
         function handleOrientation(event) {
             if (!gameActive) return;
 
-            let beta = event.beta;   
-            let gamma = event.gamma; 
+            let alpha = event.alpha; // Pusula / Sağa-Sola dönüş yönü (Yaw)
+            let beta = event.beta;   // Cihaz öne-arkaya eğim (Pitch)
+            let gamma = event.gamma; // Cihazın kulak yönünde yatışı (Roll)
 
-            // Eğer ilk defa veri akışı geliyorsa, o anki duruşu başlangıç merkez noktası olarak kilitliyoruz
             if (initialBeta === null && beta !== null) {
-                initialBeta = beta; // Telefonun diklik sıfır referansı kilitlendi
-                initialGamma = gamma; // Telefonun yataylık sıfır referansı kilitlendi
+                initialBeta = beta;
+                initialGamma = gamma;
+                // Cihazın ilk yönelimini yaw sıfırı için alfa tabanı kabul ediyoruz
+                airplane.userData.initialAlpha = alpha; 
             }
 
-            // Gelen anlık veriyi başlangıç referansından çıkararak net sapmayı buluyoruz (Delta kontrolü)
+            // 1. Yukarı/Aşağı Tilt -> Pitch (İrtifa Değişimi)
             let deltaBeta = initialBeta - beta;
-            let deltaGamma = gamma - initialGamma;
+            targetPitch = deltaBeta * 0.022; 
 
-            // Hassas sınırlandırma ve sıfır çapa kontrolü
-            targetPitch = deltaBeta * 0.025; 
-            targetRoll = deltaGamma * 0.025;
+            // 2. Sağa/Sola Kulak Yönlü Tilt -> Roll (Gövdenin kendi ekseninde tam tur dönmesi)
+            let deltaGamma = gamma - initialGamma;
+            // İstediğin ters/düz yön dengesini kurmak için gamma farkını doğrudan roll yönelimine bağlıyoruz
+            targetRoll = deltaGamma * -0.035; 
+
+            // 3. Sağa/Sola Kafa Çevirme -> Yaw (Burun Doğrultusunu Değiştirme)
+            if(airplane.userData.initialAlpha !== undefined) {
+                let deltaAlpha = alpha - airplane.userData.initialAlpha;
+                // 180 derece taşma koruması
+                if (deltaAlpha > 180) deltaAlpha -= 360;
+                if (deltaAlpha < -180) deltaAlpha += 360;
+                targetYaw = deltaAlpha * 0.025;
+            }
         }
 
-        let audioCtx;
-        function initAudio() {
+        // --- RETRO C64 SES MOTORU VE DİNAMİK MOTOR ALTYAPISI ---
+        function initAudioEngine() {
             audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-            const osc = audioCtx.createOscillator();
-            const gainNode = audioCtx.createGain();
-            const filter = audioCtx.createBiquadFilter();
-            osc.type = 'sawtooth';
-            osc.frequency.setValueAtTime(40, audioCtx.currentTime); 
-            filter.type = 'lowpass';
-            filter.frequency.setValueAtTime(100, audioCtx.currentTime);
-            gainNode.gain.setValueAtTime(0.05, audioCtx.currentTime);
-            osc.connect(filter);
-            filter.connect(gainNode);
-            gainNode.connect(audioCtx.destination);
-            osc.start();
+            
+            // DİNAMİK MOTOR SESİ ÜRETİMİ
+            motorOsc = audioCtx.createOscillator();
+            motorGain = audioCtx.createGain();
+            const motorFilter = audioCtx.createBiquadFilter();
+            
+            motorOsc.type = 'sawtooth'; // Retro kaba motor tınısı
+            motorOsc.frequency.setValueAtTime(45, audioCtx.currentTime); 
+            
+            motorFilter.type = 'lowpass';
+            motorFilter.frequency.setValueAtTime(120, audioCtx.currentTime);
+            
+            motorGain.gain.setValueAtTime(0.05, audioCtx.currentTime);
+            
+            motorOsc.connect(motorFilter);
+            motorFilter.connect(motorGain);
+            motorGain.connect(audioCtx.destination);
+            motorOsc.start();
+
+            // COMMODORE 64 RETRO CHIPTUNE MÜZİK DÖNGÜSÜ
+            // Eski 8-bit arpej stilinde minimalist retro nota dizilimi
+            const c64Notes = [130.81, 146.83, 164.81, 196.00, 220.00, 196.00, 164.81, 146.83]; 
+            let noteIndex = 0;
+
+            bgmInterval = setInterval(() => {
+                if (!gameActive) return;
+                
+                const synthOsc = audioCtx.createOscillator();
+                const synthGain = audioCtx.createGain();
+                
+                synthOsc.type = 'square'; // Net C64/SID sesi karakteristiği (Kare Dalga)
+                synthOsc.frequency.setValueAtTime(c64Notes[noteIndex], audioCtx.currentTime);
+                
+                // Hızlı arpej (chup) hissi katmak için frekansı milisaniyeler içinde katla
+                synthOsc.frequency.exponentialRampToValueAtTime(c64Notes[noteIndex] * 2, audioCtx.currentTime + 0.12);
+
+                synthGain.gain.setValueAtTime(0.015, audioCtx.currentTime);
+                synthGain.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + 0.18);
+                
+                synthOsc.connect(synthGain);
+                synthGain.connect(audioCtx.destination);
+                
+                synthOsc.start();
+                synthOsc.stop(audioCtx.currentTime + 0.2);
+                
+                noteIndex = (noteIndex + 1) % c64Notes.length;
+            }, 200); // 8-bit tempo hızı
         }
 
         function playScoreSound() {
             if (!audioCtx) return;
             const osc = audioCtx.createOscillator();
             const gain = audioCtx.createGain();
-            osc.type = 'sine';
-            osc.frequency.setValueAtTime(900, audioCtx.currentTime); 
-            gain.gain.setValueAtTime(0.12, audioCtx.currentTime);
-            gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.5);
+            osc.type = 'triangle'; // Retro coin toplama tınısı
+            osc.frequency.setValueAtTime(600, audioCtx.currentTime);
+            osc.frequency.setValueAtTime(950, audioCtx.currentTime + 0.08); 
+            gain.gain.setValueAtTime(0.08, audioCtx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.3);
             osc.connect(gain);
             gain.connect(audioCtx.destination);
             osc.start();
-            osc.stop(audioCtx.currentTime + 0.5);
+            osc.stop(audioCtx.currentTime + 0.3);
         }
 
         let clock = new THREE.Clock();
@@ -453,31 +485,42 @@
             if (gameActive) {
                 const delta = clock.getDelta();
                 speed = 0.8 + (180 - timeLeft) * 0.002;
-                airplane.position.z -= speed;
 
+                // Jiroskop sönümleme sentezi (Lerp)
                 currentPitch += (targetPitch - currentPitch) * lerpFactor;
                 currentRoll += (targetRoll - currentRoll) * lerpFactor;
+                currentYaw += (targetYaw - currentYaw) * lerpFactor;
 
-                airplane.position.y += currentPitch * 0.4;
-                airplane.position.x += currentRoll * 0.4;
-                
-                airplane.rotation.z = currentRoll * 0.8;
-                airplane.rotation.x = currentPitch * 0.4;
-                
-                // Sinematik Pervane Dönüşü
+                // --- DİNAMİK MOTOR SESİ ETKİLEŞİMİ ---
+                if(motorOsc && motorGain) {
+                    // İrtifa kazanırken (currentPitch pozitifken) motor perdesi ve gürlüğü artar
+                    let pitchFactor = Math.max(-0.5, Math.min(1.5, currentPitch * 3.0)); 
+                    motorOsc.frequency.setTargetAtTime(45 + (pitchFactor * 40), audioCtx.currentTime, 0.1);
+                    motorGain.gain.setTargetAtTime(0.05 + (pitchFactor * 0.03), audioCtx.currentTime, 0.1);
+                }
+
+                // 6DoF Matris Sentezi: Uçağın lokal eksenlerini bozmadan yönlendirme yapıyoruz
+                airplane.rotateX(currentPitch * 0.05);
+                airplane.rotateY(currentYaw * 0.05);
+                airplane.rotateZ(currentRoll * 0.08);
+
+                // Uçak her halükarda kendi burnunun baktığı doğrultuda (Lokal Z ekseni yönünde) ileri uçar
+                airplane.translateZ(-speed);
+
                 propeller.rotation.z += 0.6;
 
+                // Kamera uçağın arkasından akıcı takibe devam eder
                 camera.position.x += (airplane.position.x - camera.position.x) * 0.1;
-                camera.position.y += ((airplane.position.y + 2.2) - camera.position.y) * 0.1;
+                camera.position.y += ((airplane.position.y + 2.4) - camera.position.y) * 0.1;
                 camera.position.z = airplane.position.z + 10;
-                camera.lookAt(airplane.position.x, airplane.position.y + 0.8, airplane.position.z - 6);
+                camera.lookAt(airplane.position.x, airplane.position.y + 0.6, airplane.position.z - 6);
 
+                // Gökyüzü renk geçişi
                 const progress = (180 - timeLeft) / 180;
                 scene.background.lerpColors(new THREE.Color(colors.skyDay), new THREE.Color(colors.skySunset), progress);
 
                 fuel -= delta * 0.55;
-                const fuelBars = document.querySelectorAll('.fuel-bar');
-                fuelBars.forEach(bar => bar.style.width = `${Math.max(0, fuel)}%`);
+                document.querySelectorAll('.fuel-bar').forEach(bar => bar.style.width = `${Math.max(0, fuel)}%`);
                 
                 if (fuel <= 0) gameOver("Benzin Bitti!");
 
@@ -492,19 +535,19 @@
         function checkCollisions() {
             const planePos = airplane.position;
             rings.forEach((ring, index) => {
-                if (planePos.distanceTo(ring.position) < 2.0) {
+                if (planePos.distanceTo(ring.position) < 2.2) {
                     scene.remove(ring); rings.splice(index, 1); score += 10;
                     updateUIScore(); playScoreSound();
-                } else if (ring.position.z > planePos.z + 5) {
+                } else if (ring.position.z > planePos.z + 8) {
                     scene.remove(ring); rings.splice(index, 1);
                     score = Math.max(0, score - 5); updateUIScore();
                 }
             });
             fuelCans.forEach((can, index) => {
-                if (planePos.distanceTo(can.position) < 1.8) {
+                if (planePos.distanceTo(can.position) < 2.0) {
                     scene.remove(can); fuelCans.splice(index, 1);
                     fuel = Math.min(100, fuel + 30); playScoreSound();
-                } else if (can.position.z > planePos.z + 5) { scene.remove(can); fuelCans.splice(index, 1); }
+                } else if (can.position.z > planePos.z + 8) { scene.remove(can); fuelCans.splice(index, 1); }
             });
         }
 
@@ -523,6 +566,8 @@
 
         function gameOver(message) {
             gameActive = false;
+            if (bgmInterval) clearInterval(bgmInterval);
+            if (motorOsc) { try { motorOsc.stop(); } catch(e){} }
             if (wakeLock !== null) { wakeLock.release().then(() => wakeLock = null); }
             alert(`${message}\nToplam Skorunuz: ${score}`);
             window.location.reload();
