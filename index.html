@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>Zen Biplane VR - Retro C64 & 6DoF Edition</title>
+    <title>Zen Biplane VR - Quaternion 6DoF Edition</title>
     <style>
         html, body {
             width: 100%;
@@ -117,16 +117,22 @@
         let gameActive = false;
         let speed = 0.8;
         
-        // Hassas 6DoF Rotasyon Yönetimi
-        let targetPitch = 0, targetYaw = 0, targetRoll = 0;
-        let currentPitch = 0, currentYaw = 0, currentRoll = 0;
-        const lerpFactor = 0.02; 
+        // Quaternion Hedef Dönüş Değerleri
+        let targetPitchRate = 0;
+        let targetYawRate = 0;
+        let targetRollRate = 0;
+        
+        let currentPitchRate = 0;
+        let currentYawRate = 0;
+        let currentRollRate = 0;
+        const lerpFactor = 0.05; // Quaternion geçişlerinde biraz daha hızlı tepki için artırıldı
+        
         let wakeLock = null; 
-
         let initialBeta = null;
         let initialGamma = null;
+        let initialAlpha = null;
 
-        // Web Audio Sentezleyicileri (Synth)
+        // Ses Sentezleyicileri
         let audioCtx = null;
         let motorOsc = null;
         let motorGain = null;
@@ -157,6 +163,7 @@
 
             initialBeta = null;
             initialGamma = null;
+            initialAlpha = null;
 
             setTimeout(() => {
                 onWindowResize();
@@ -166,9 +173,7 @@
                 document.getElementById('ui-right').style.display = 'flex';
                 gameActive = true;
                 
-                // Sesleri Başlat
                 initAudioEngine(); 
-                
                 requestWakeLock();
             }, 500);
         });
@@ -236,6 +241,9 @@
 
         function createAirplane() {
             airplane = new THREE.Group();
+
+            // Dönüşlerin düzgün hesaplanması için uçağın rotasyon sırasını Quaternion tabanına bırakıyoruz
+            airplane.matrixAutoUpdate = true;
 
             const bodyMat = new THREE.MeshPhongMaterial({ color: colors.planeBody, flatShading: true });
             const wingMat = new THREE.MeshPhongMaterial({ color: colors.planeWing, flatShading: true });
@@ -307,10 +315,8 @@
             scene.add(airplane);
         }
 
-        // --- DÜZELTME: TAMAMEN DÜMDÜZ ASFALT YOL ---
         function generateStraightPath() {
             let zPos = 0;
-            // Sapma olmadan uçağın rotası boyunca dümdüz ilerleyen yol segmentleri
             for (let i = 0; i < 600; i++) {
                 const roadGeo = new THREE.PlaneGeometry(8, 20);
                 const roadMat = new THREE.MeshLambertMaterial({ color: colors.road });
@@ -330,16 +336,14 @@
                 rightSand.position.x = 4.75;
                 scene.add(rightSand);
 
-                if (i % 4 === 0 && i > 4) { 
-                    spawnGameplayElements(zPos); 
-                }
+                if (i % 4 === 0 && i > 4) { spawnGameplayElements(zPos); }
                 zPos -= 18; 
             }
         }
 
         function spawnGameplayElements(zPos) {
             const randomY = 4 + Math.random() * 9; 
-            const randomX = (Math.random() - 0.5) * 6; // Yol eksenine göre simetrik yayılım
+            const randomX = (Math.random() - 0.5) * 6;
 
             if (Math.random() > 0.25) {
                 const ringGeo = new THREE.TorusGeometry(1.6, 0.12, 8, 16);
@@ -351,7 +355,7 @@
             } else {
                 const fuelGeo = new THREE.CylinderGeometry(0.4, 0.4, 1.0, 5);
                 const fuelMat = new THREE.MeshLambertMaterial({ color: colors.fuel });
-                const fuelCan = new THREE.Mesh(fuelGeo, fuelMat);
+                const fuelCan = new THREE.Mesh(fuelGeo, fuelCan);
                 fuelCan.position.set(randomX, randomY, zPos);
                 scene.add(fuelCan);
                 fuelCans.push(fuelCan);
@@ -376,50 +380,44 @@
             } else { window.addEventListener('deviceorientation', handleOrientation); }
         }
 
-        // --- İSTEDİĞİN SENTEZLENMİŞ 6DoF KONTROL ŞEMASI ---
+        // --- QUATERNION TABANLI JİROSKOP KONTROL SENTEZİ ---
         function handleOrientation(event) {
             if (!gameActive) return;
 
-            let alpha = event.alpha; // Pusula / Sağa-Sola dönüş yönü (Yaw)
-            let beta = event.beta;   // Cihaz öne-arkaya eğim (Pitch)
-            let gamma = event.gamma; // Cihazın kulak yönünde yatışı (Roll)
+            let alpha = event.alpha; 
+            let beta = event.beta;   
+            let gamma = event.gamma; 
 
             if (initialBeta === null && beta !== null) {
                 initialBeta = beta;
                 initialGamma = gamma;
-                // Cihazın ilk yönelimini yaw sıfırı için alfa tabanı kabul ediyoruz
-                airplane.userData.initialAlpha = alpha; 
+                initialAlpha = alpha;
             }
 
-            // 1. Yukarı/Aşağı Tilt -> Pitch (İrtifa Değişimi)
+            // 1. Yukarı/Aşağı Tilt -> Lokal Pitch Dönüş Hızı (Kafayı kaldırma/eğme)
             let deltaBeta = initialBeta - beta;
-            targetPitch = deltaBeta * 0.022; 
+            targetPitchRate = deltaBeta * 0.0012; 
 
-            // 2. Sağa/Sola Kulak Yönlü Tilt -> Roll (Gövdenin kendi ekseninde tam tur dönmesi)
+            // 2. Sağa/Sola Kafa Çevirme -> Lokal Yaw Dönüş Hızı (Doğrultu değiştirme)
+            let deltaAlpha = alpha - initialAlpha;
+            if (deltaAlpha > 180) deltaAlpha -= 360;
+            if (deltaAlpha < -180) deltaAlpha += 360;
+            targetYawRate = deltaAlpha * 0.0015;
+
+            // 3. Sağa/Sola Yana Yatırma -> Lokal Roll Dönüş Hızı (Kendi etrafında tam tur)
             let deltaGamma = gamma - initialGamma;
-            // İstediğin ters/düz yön dengesini kurmak için gamma farkını doğrudan roll yönelimine bağlıyoruz
-            targetRoll = deltaGamma * -0.035; 
-
-            // 3. Sağa/Sola Kafa Çevirme -> Yaw (Burun Doğrultusunu Değiştirme)
-            if(airplane.userData.initialAlpha !== undefined) {
-                let deltaAlpha = alpha - airplane.userData.initialAlpha;
-                // 180 derece taşma koruması
-                if (deltaAlpha > 180) deltaAlpha -= 360;
-                if (deltaAlpha < -180) deltaAlpha += 360;
-                targetYaw = deltaAlpha * 0.025;
-            }
+            // İstediğin zıt yön dengesine göre çarpanı ayarladık
+            targetRollRate = deltaGamma * -0.0025; 
         }
 
-        // --- RETRO C64 SES MOTORU VE DİNAMİK MOTOR ALTYAPISI ---
         function initAudioEngine() {
             audioCtx = new (window.AudioContext || window.webkitAudioContext)();
             
-            // DİNAMİK MOTOR SESİ ÜRETİMİ
             motorOsc = audioCtx.createOscillator();
             motorGain = audioCtx.createGain();
             const motorFilter = audioCtx.createBiquadFilter();
             
-            motorOsc.type = 'sawtooth'; // Retro kaba motor tınısı
+            motorOsc.type = 'sawtooth';
             motorOsc.frequency.setValueAtTime(45, audioCtx.currentTime); 
             
             motorFilter.type = 'lowpass';
@@ -432,24 +430,19 @@
             motorGain.connect(audioCtx.destination);
             motorOsc.start();
 
-            // COMMODORE 64 RETRO CHIPTUNE MÜZİK DÖNGÜSÜ
-            // Eski 8-bit arpej stilinde minimalist retro nota dizilimi
             const c64Notes = [130.81, 146.83, 164.81, 196.00, 220.00, 196.00, 164.81, 146.83]; 
             let noteIndex = 0;
 
             bgmInterval = setInterval(() => {
                 if (!gameActive) return;
-                
                 const synthOsc = audioCtx.createOscillator();
                 const synthGain = audioCtx.createGain();
                 
-                synthOsc.type = 'square'; // Net C64/SID sesi karakteristiği (Kare Dalga)
+                synthOsc.type = 'square'; 
                 synthOsc.frequency.setValueAtTime(c64Notes[noteIndex], audioCtx.currentTime);
-                
-                // Hızlı arpej (chup) hissi katmak için frekansı milisaniyeler içinde katla
                 synthOsc.frequency.exponentialRampToValueAtTime(c64Notes[noteIndex] * 2, audioCtx.currentTime + 0.12);
 
-                synthGain.gain.setValueAtTime(0.015, audioCtx.currentTime);
+                synthGain.gain.setValueAtTime(0.012, audioCtx.currentTime);
                 synthGain.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + 0.18);
                 
                 synthOsc.connect(synthGain);
@@ -459,14 +452,14 @@
                 synthOsc.stop(audioCtx.currentTime + 0.2);
                 
                 noteIndex = (noteIndex + 1) % c64Notes.length;
-            }, 200); // 8-bit tempo hızı
+            }, 200);
         }
 
         function playScoreSound() {
             if (!audioCtx) return;
             const osc = audioCtx.createOscillator();
             const gain = audioCtx.createGain();
-            osc.type = 'triangle'; // Retro coin toplama tınısı
+            osc.type = 'triangle';
             osc.frequency.setValueAtTime(600, audioCtx.currentTime);
             osc.frequency.setValueAtTime(950, audioCtx.currentTime + 0.08); 
             gain.gain.setValueAtTime(0.08, audioCtx.currentTime);
@@ -486,36 +479,51 @@
                 const delta = clock.getDelta();
                 speed = 0.8 + (180 - timeLeft) * 0.002;
 
-                // Jiroskop sönümleme sentezi (Lerp)
-                currentPitch += (targetPitch - currentPitch) * lerpFactor;
-                currentRoll += (targetRoll - currentRoll) * lerpFactor;
-                currentYaw += (targetYaw - currentYaw) * lerpFactor;
+                // Giriş yumuşatmaları (Lerp)
+                currentPitchRate += (targetPitchRate - currentPitchRate) * lerpFactor;
+                currentYawRate += (targetYawRate - currentYawRate) * lerpFactor;
+                currentRollRate += (targetRollRate - currentRollRate) * lerpFactor;
 
-                // --- DİNAMİK MOTOR SESİ ETKİLEŞİMİ ---
+                // --- DİNAMİK MOTOR SESİ GÜNCELLEMESİ ---
                 if(motorOsc && motorGain) {
-                    // İrtifa kazanırken (currentPitch pozitifken) motor perdesi ve gürlüğü artar
-                    let pitchFactor = Math.max(-0.5, Math.min(1.5, currentPitch * 3.0)); 
+                    let pitchFactor = Math.max(-0.5, Math.min(1.5, currentPitchRate * 80.0)); 
                     motorOsc.frequency.setTargetAtTime(45 + (pitchFactor * 40), audioCtx.currentTime, 0.1);
                     motorGain.gain.setTargetAtTime(0.05 + (pitchFactor * 0.03), audioCtx.currentTime, 0.1);
                 }
 
-                // 6DoF Matris Sentezi: Uçağın lokal eksenlerini bozmadan yönlendirme yapıyoruz
-                airplane.rotateX(currentPitch * 0.05);
-                airplane.rotateY(currentYaw * 0.05);
-                airplane.rotateZ(currentRoll * 0.08);
+                // --- KUSURSUZ 6DoF QUATERNION MATRİS SENTEZLEMESİ ---
+                // Uçağın o anki yönelimini temsil eden lokal eksen vektörleri
+                const localX = new THREE.Vector3(1, 0, 0).applyQuaternion(airplane.quaternion);
+                const localY = new THREE.Vector3(0, 1, 0).applyQuaternion(airplane.quaternion);
+                const localZ = new THREE.Vector3(0, 0, 1).applyQuaternion(airplane.quaternion);
 
-                // Uçak her halükarda kendi burnunun baktığı doğrultuda (Lokal Z ekseni yönünde) ileri uçar
-                airplane.translateZ(-speed);
+                // Her bir eksen dönüşünü bağımsız birer Quaternion olarak üretiyoruz
+                const pitchQuat = new THREE.Quaternion().setFromAxisAngle(localX, currentPitchRate);
+                const yawQuat = new THREE.Quaternion().setFromAxisAngle(localY, currentYawRate);
+                const rollQuat = new THREE.Quaternion().setFromAxisAngle(localZ, currentRollRate);
+
+                // Tüm dönüşleri uçağın mevcut yönelimiyle sırayla çarpıp sentezliyoruz (Kilitlenme imkansızdır)
+                airplane.quaternion.multiplyQuaternions(pitchQuat, airplane.quaternion);
+                airplane.quaternion.multiplyQuaternions(yawQuat, airplane.quaternion);
+                airplane.quaternion.multiplyQuaternions(rollQuat, airplane.quaternion);
+
+                // Uçak kendi baktığı lokal ileri doğrultusunda (Lokal eksi Z) hareket eder
+                const forwardVector = new THREE.Vector3(0, 0, -1).applyQuaternion(airplane.quaternion);
+                airplane.position.addScaledVector(forwardVector, speed);
 
                 propeller.rotation.z += 0.6;
 
-                // Kamera uçağın arkasından akıcı takibe devam eder
-                camera.position.x += (airplane.position.x - camera.position.x) * 0.1;
-                camera.position.y += ((airplane.position.y + 2.4) - camera.position.y) * 0.1;
-                camera.position.z = airplane.position.z + 10;
-                camera.lookAt(airplane.position.x, airplane.position.y + 0.6, airplane.position.z - 6);
+                // Kameranın arkadan takibi (Uçağın arkasında sabit bir lokal noktayı takip eder)
+                const relativeCameraOffset = new THREE.Vector3(0, 2.4, 10).applyQuaternion(airplane.quaternion);
+                const targetCamPos = airplane.position.clone().add(relativeCameraOffset);
+                camera.position.lerp(targetCamPos, 0.1);
+                
+                // Kameranın her zaman uçağın lokal yukarısını tavan kabul ederek bakmasını sağlıyoruz
+                const cameraUpVector = new THREE.Vector3(0, 1, 0).applyQuaternion(airplane.quaternion);
+                camera.up.copy(cameraUpVector);
+                camera.lookAt(airplane.position.clone().add(new THREE.Vector3(0, 0.6, 0).applyQuaternion(airplane.quaternion)));
 
-                // Gökyüzü renk geçişi
+                // Çevre ve Zaman Akışı
                 const progress = (180 - timeLeft) / 180;
                 scene.background.lerpColors(new THREE.Color(colors.skyDay), new THREE.Color(colors.skySunset), progress);
 
@@ -538,7 +546,7 @@
                 if (planePos.distanceTo(ring.position) < 2.2) {
                     scene.remove(ring); rings.splice(index, 1); score += 10;
                     updateUIScore(); playScoreSound();
-                } else if (ring.position.z > planePos.z + 8) {
+                } else if (planePos.z < ring.position.z - 10) { // Dümdüz ileri gittiği için arkada kalanları siler
                     scene.remove(ring); rings.splice(index, 1);
                     score = Math.max(0, score - 5); updateUIScore();
                 }
@@ -547,7 +555,7 @@
                 if (planePos.distanceTo(can.position) < 2.0) {
                     scene.remove(can); fuelCans.splice(index, 1);
                     fuel = Math.min(100, fuel + 30); playScoreSound();
-                } else if (can.position.z > planePos.z + 8) { scene.remove(can); fuelCans.splice(index, 1); }
+                } else if (planePos.z < can.position.z - 10) { scene.remove(can); fuelCans.splice(index, 1); }
             });
         }
 
