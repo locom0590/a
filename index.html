@@ -2,87 +2,105 @@
 <html lang="tr">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>Zen Biplane VR - Quaternion 6DoF Edition</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Zen VR Biplane - 6DoF</title>
     <style>
-        html, body {
-            width: 100%;
-            height: 100%;
+        body {
             margin: 0;
             padding: 0;
             overflow: hidden;
-            background-color: #e0d8c3;
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #f0ebd8;
+            font-family: sans-serif;
+            user-select: none;
+            -webkit-user-select: none;
         }
         #canvas-container {
             width: 100vw;
             height: 100vh;
-            position: absolute;
-            top: 0;
-            left: 0;
+            display: block;
         }
-        #vr-divider {
+        /* Kalibrasyon ve Başlangıç Ekranı */
+        #overlay {
             position: absolute;
-            left: 50%;
-            top: 0;
-            width: 2px;
-            height: 100vh;
-            background: rgba(255, 255, 255, 0.15);
-            z-index: 15;
-            pointer-events: none;
-            display: none;
-        }
-        .ui-side {
-            position: absolute;
-            top: 20px;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: radial-gradient(circle, #f0ebd8 0%, #dddec6 100%);
             display: flex;
-            gap: 20px;
-            color: #4a4e4d;
-            font-weight: 600;
-            font-size: 14px;
-            letter-spacing: 1px;
-            pointer-events: none;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
             z-index: 10;
-            display: none;
+            text-align: center;
         }
-        #ui-left { left: 4%; }
-        #ui-right { left: 54%; }
-
-        .ui-element {
-            background: rgba(245, 242, 235, 0.8);
-            padding: 6px 12px;
+        h1 { color: #3d5a80; margin-bottom: 5px; font-size: 28px; letter-spacing: 2px; }
+        p { color: #293241; max-width: 80%; margin-bottom: 30px; font-size: 14px; line-height: 1.5; }
+        button {
+            padding: 15px 40px;
+            font-size: 18px;
+            font-weight: bold;
+            cursor: pointer;
+            background-color: #3d5a80;
+            color: white;
+            border: none;
+            border-radius: 30px;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+            transition: all 0.2s;
+        }
+        button:active { transform: scale(0.95); }
+        
+        /* İki Göz İçin Ayrılmış VR UI Katmanları */
+        .ui-container {
+            position: absolute;
+            top: 0;
+            width: 50%;
+            height: 100%;
+            pointer-events: none;
+            display: flex;
+            flex-direction: column;
+            justify-content: flex-start;
+            align-items: center;
+            box-sizing: border-box;
+            padding-top: 5vh;
+            z-index: 5;
+        }
+        #ui-left { left: 0; border-right: 1px dashed rgba(0,0,0,0.05); }
+        #ui-right { left: 50%; }
+        
+        .hud {
+            background: rgba(41, 50, 65, 0.85);
+            padding: 10px 20px;
             border-radius: 15px;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+            color: #fff;
+            font-family: 'Courier New', Courier, monospace;
+            font-size: 14px;
+            font-weight: bold;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+            display: flex;
+            gap: 15px;
         }
         .fuel-bar-container {
-            width: 60px;
-            height: 8px;
-            background: #d1caa1;
-            border-radius: 4px;
-            display: inline-block;
-            vertical-align: middle;
-            margin-left: 5px;
+            width: 100px;
+            height: 12px;
+            background: #457b9d;
+            border-radius: 6px;
             overflow: hidden;
+            align-self: center;
+            border: 1px solid #fff;
         }
         .fuel-bar {
             width: 100%;
             height: 100%;
-            background: #8fa89b;
+            background: #e63946;
+            transition: width 0.1s linear;
         }
-        #start-btn {
+        #game-over {
             position: absolute;
-            bottom: 40px;
-            left: 50%;
-            transform: translateX(-50%);
-            padding: 15px 40px;
-            background: #8fa89b;
-            color: white;
-            border: none;
-            border-radius: 30px;
-            font-size: 18px;
-            cursor: pointer;
-            box-shadow: 0 10px 20px rgba(0,0,0,0.1);
-            transition: all 0.3s ease;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.85);
+            color: #fff;
+            display: none;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
             z-index: 20;
         }
     </style>
@@ -90,504 +108,631 @@
 </head>
 <body>
 
-    <div id="ui-left" class="ui-side">
-        <div class="ui-element">Süre: <span class="time-txt">03:00</span></div>
-        <div class="ui-element">Skor: <span class="score-txt">0</span></div>
-        <div class="ui-element">Benzin: <div class="fuel-bar-container"><div class="fuel-bar"></div></div></div>
+    <div id="overlay">
+        <h1>ZEN VR BIPLANE</h1>
+        <p>Cihazınızı yatay olarak VR Box (Cardboard) içine yerleştirin.<br>Başlat düğmesine bastığınız an cihazın duruşu <b>SIFIR NOKTASI</b> olarak kalibre edilecektir.</p>
+        <button id="start-btn">OYUNU BAŞLAT</button>
     </div>
 
-    <div id="ui-right" class="ui-side">
-        <div class="ui-element">Süre: <span class="time-txt">03:00</span></div>
-        <div class="ui-element">Skor: <span class="score-txt">0</span></div>
-        <div class="ui-element">Benzin: <div class="fuel-bar-container"><div class="fuel-bar"></div></div></div>
+    <div id="ui-left" class="ui-container">
+        <div class="hud">
+            <span>SKOR: <span class="score-val">0</span></span>
+            <div class="fuel-bar-container"><div class="fuel-bar"></div></div>
+        </div>
     </div>
 
-    <div id="vr-divider"></div>
-    <button id="start-btn">Kafanı Dik Tut ve Başlat</button>
+    <div id="ui-right" class="ui-container">
+        <div class="hud">
+            <span>SKOR: <span class="score-val">0</span></span>
+            <div class="fuel-bar-container"><div class="fuel-bar"></div></div>
+        </div>
+    </div>
+
+    <div id="game-over">
+        <h1 style="color: #e63946;">BENZİN BİTTİ!</h1>
+        <p style="color: #fff;" id="final-score">Toplam Skor: 0</p>
+        <button onclick="window.location.reload()">YENİDEN DENE</button>
+    </div>
+
     <div id="canvas-container"></div>
 
     <script>
-        let scene, camera, renderer, stereoEffect;
-        let airplane, propeller;
-        let rings = [], fuelCans = [];
+        // --- DEĞİŞKENLER VE AYARLAR ---
+        let scene, renderer, leftCamera, rightCamera;
+        let container = document.getElementById('canvas-container');
         
+        // Oyun Durumu
         let score = 0;
         let fuel = 100;
-        let timeLeft = 180; 
-        let gameActive = false;
-        let speed = 0.8;
+        let isPlaying = false;
+        const speed = 0.8; // Sabit ileri akış hızı
         
-        // Quaternion Hedef Dönüş Değerleri
-        let targetPitchRate = 0;
-        let targetYawRate = 0;
-        let targetRollRate = 0;
+        // Nesne Grupları
+        let airplaneGroup;
+        let propellerBlur;
+        let environmentGroup;
         
-        let currentPitchRate = 0;
-        let currentYawRate = 0;
-        let currentRollRate = 0;
-        const lerpFactor = 0.05; // Quaternion geçişlerinde biraz daha hızlı tepki için artırıldı
+        // Havuzlama (Pooling) ve Algoritmik Yapılar
+        let roadSegments = [];
+        let activeElements = [];
+        let lastSegmentZ = 0;
+        const segmentLength = 100;
+        const visibleSegments = 5;
         
-        let wakeLock = null; 
-        let initialBeta = null;
-        let initialGamma = null;
-        let initialAlpha = null;
-
-        // Ses Sentezleyicileri
-        let audioCtx = null;
-        let motorOsc = null;
-        let motorGain = null;
-        let bgmInterval = null;
-
-        const colors = {
-            skyDay: 0xcfe0e8,
-            skySunset: 0xebaca2,
-            fog: 0xe0d8c3,
-            road: 0x4d515a, 
-            sand: 0xf5f2eb, 
-            planeBody: 0x738c80, 
-            planeWing: 0xe3dac9, 
-            planeDetail: 0xaa6c5b, 
-            ring: 0xe8a87c, 
-            fuel: 0xd9cbd3
-        };
-
-        const container = document.getElementById('canvas-container');
-        const startBtn = document.getElementById('start-btn');
-
-        startBtn.addEventListener('click', async () => {
-            initPermissions();
-            
-            const docEl = document.documentElement;
-            if (docEl.requestFullscreen) { await docEl.requestFullscreen(); }
-            else if (docEl.webkitRequestFullscreen) { await docEl.webkitRequestFullscreen(); }
-
-            initialBeta = null;
-            initialGamma = null;
-            initialAlpha = null;
-
-            setTimeout(() => {
-                onWindowResize();
-                startBtn.style.display = 'none';
-                document.getElementById('vr-divider').style.display = 'block';
-                document.getElementById('ui-left').style.display = 'flex';
-                document.getElementById('ui-right').style.display = 'flex';
-                gameActive = true;
-                
-                initAudioEngine(); 
-                requestWakeLock();
-            }, 500);
-        });
-
-        async function requestWakeLock() {
-            try {
-                if ('wakeLock' in navigator) { wakeLock = await navigator.wakeLock.request('screen'); }
-            } catch (err) { console.log(err); }
-        }
-
-        class CustomStereoEffect {
-            constructor(renderer) {
-                this.stereo = new THREE.StereoCamera();
-                this.stereo.aspect = 0.5; 
-                this.renderer = renderer;
-            }
-            render(scene, camera) {
-                scene.updateMatrixWorld();
-                if (camera.parent === null) camera.updateMatrixWorld();
-                this.stereo.update(camera);
-                const size = new THREE.Vector2();
-                this.renderer.getSize(size);
-                this.renderer.setScissorTest(true);
-                this.renderer.setScissor(0, 0, size.x / 2, size.y);
-                this.renderer.setViewport(0, 0, size.x / 2, size.y);
-                this.renderer.render(scene, this.stereo.cameraL);
-                this.renderer.setScissor(size.x / 2, 0, size.x / 2, size.y);
-                this.renderer.setViewport(size.x / 2, 0, size.x / 2, size.y);
-                this.renderer.render(scene, this.stereo.cameraR);
-                this.renderer.setScissorTest(false);
-            }
-        }
-
+        // Jiroskop ve Kusursuz 6DoF Kontrol Nesneleri
+        let deviceOrientation = { alpha: 0, beta: 0, gamma: 0 };
+        let initialOrientation = { alpha: 0, beta: 0, gamma: 0 };
+        let hasCalibrated = false;
+        
+        // Dönüş toleransları ve hassasiyet çarpanları
+        const targetQuaternion = new THREE.Quaternion();
+        const currentQuaternion = new THREE.Quaternion();
+        
+        // --- WEB AUDIO API (SYNTH) DEĞİŞKENLERİ ---
+        let audioCtx, motorOsc, motorGain, bgmInterval;
+        
+        // --- 1. ADIM: SAHNE VE STEREO RETİNA KURULUMU ---
         function init() {
             scene = new THREE.Scene();
-            scene.background = new THREE.Color(colors.skyDay);
-            scene.fog = new THREE.FogExp2(colors.fog, 0.006);
-
-            camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+            scene.background = new THREE.Color(0xf0ebd8); // Fildişi/Açık Mavi Zen tonu
+            scene.fog = new THREE.FogExp2(0xf0ebd8, 0.007); // Ufukta kaybolma hissi
             
             renderer = new THREE.WebGLRenderer({ antialias: true });
-            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
             renderer.setSize(window.innerWidth, window.innerHeight);
-            renderer.outputEncoding = THREE.sRGBEncoding;
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            renderer.shadowMap.enabled = true;
             container.appendChild(renderer.domElement);
+            
+            // Stereo Kamera Yapılandırması (Sol ve Sağ Göz Ayrımı)
+            leftCamera = new THREE.PerspectiveCamera(60, (window.innerWidth / 2) / window.innerHeight, 0.1, 1000);
+            rightCamera = new THREE.PerspectiveCamera(60, (window.innerWidth / 2) / window.innerHeight, 0.1, 1000);
+            
+            // Göz bebekleri arası mesafe simülasyonu (IPD)
+            const ipd = 0.12;
+            leftCamera.position.set(-ipd, 4, 15);
+            rightCamera.position.set(ipd, 4, 15);
 
-            stereoEffect = new CustomStereoEffect(renderer);
-
-            const ambientLight = new THREE.AmbientLight(0xffffff, 0.65);
+            // Işıklandırma
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
             scene.add(ambientLight);
+            
+            const sunLight = new THREE.DirectionalLight(0xfff3e0, 0.8);
+            sunLight.position.set(50, 100, -50);
+            sunLight.castShadow = true;
+            scene.add(sunLight);
 
-            const dirLight = new THREE.DirectionalLight(0xfff5eb, 0.75);
-            dirLight.position.set(80, 120, 40);
-            scene.add(dirLight);
+            environmentGroup = new THREE.Group();
+            scene.add(environmentGroup);
 
-            createAirplane();
-            generateStraightPath();
-            createEnvironment();
-
-            camera.position.set(0, 4.8, 11); 
-            window.addEventListener('resize', onWindowResize);
-
-            animate();
-        }
-
-        function createAirplane() {
-            airplane = new THREE.Group();
-
-            // Dönüşlerin düzgün hesaplanması için uçağın rotasyon sırasını Quaternion tabanına bırakıyoruz
-            airplane.matrixAutoUpdate = true;
-
-            const bodyMat = new THREE.MeshPhongMaterial({ color: colors.planeBody, flatShading: true });
-            const wingMat = new THREE.MeshPhongMaterial({ color: colors.planeWing, flatShading: true });
-            const detailMat = new THREE.MeshPhongMaterial({ color: colors.planeDetail, flatShading: true });
-
-            const bodyGeo = new THREE.CylinderGeometry(0.45, 0.12, 3.8, 6);
-            bodyGeo.rotateX(Math.PI / 2);
-            const body = new THREE.Mesh(bodyGeo, bodyMat);
-            airplane.add(body);
-
-            const noseGeo = new THREE.CylinderGeometry(0.48, 0.45, 0.5, 6);
-            noseGeo.rotateX(Math.PI / 2);
-            const nose = new THREE.Mesh(noseGeo, detailMat);
-            nose.position.set(0, 0, -1.9);
-            airplane.add(nose);
-
-            const glassGeo = new THREE.ConeGeometry(0.25, 0.5, 4);
-            glassGeo.rotateX(Math.PI / 3);
-            const glassMat = new THREE.MeshBasicMaterial({ color: 0x222222 });
-            const glass = new THREE.Mesh(glassGeo, glassMat);
-            glass.position.set(0, 0.45, -0.4);
-            airplane.add(glass);
-
-            const wingGeo = new THREE.BoxGeometry(6.2, 0.06, 0.9);
-            const topWing = new THREE.Mesh(wingGeo, wingMat);
-            topWing.position.set(0, 0.65, -0.2);
-            const bottomWing = new THREE.Mesh(wingGeo, wingMat);
-            bottomWing.position.set(0, -0.45, -0.2);
-            airplane.add(topWing, bottomWing);
-
-            const strutGeo = new THREE.BoxGeometry(0.05, 1.1, 0.05);
-            const leftStrut = new THREE.Mesh(strutGeo, detailMat);
-            leftStrut.position.set(-2.6, 0.1, -0.2);
-            const rightStrut = leftStrut.clone();
-            rightStrut.position.x = 2.6;
-            airplane.add(leftStrut, rightStrut);
-
-            const tailHorGeo = new THREE.BoxGeometry(1.8, 0.04, 0.5);
-            const tailHor = new THREE.Mesh(tailHorGeo, wingMat);
-            tailHor.position.set(0, 0.15, 1.6);
-            airplane.add(tailHor);
-
-            const tailVertGeo = new THREE.BoxGeometry(0.04, 0.7, 0.5);
-            const tailVert = new THREE.Mesh(tailVertGeo, detailMat);
-            tailVert.position.set(0, 0.5, 1.6);
-            airplane.add(tailVert);
-
-            const wheelGeo = new THREE.CylinderGeometry(0.25, 0.25, 0.1, 6);
-            wheelGeo.rotateZ(Math.PI / 2);
-            const wheelMat = new THREE.MeshBasicMaterial({ color: 0x333333 });
-            const leftWheel = new THREE.Mesh(wheelGeo, wheelMat);
-            leftWheel.position.set(-0.6, -0.7, -1.2);
-            const rightWheel = leftWheel.clone();
-            rightWheel.position.x = 0.6;
-            airplane.add(leftWheel, rightWheel);
-
-            const propBlurGeo = new THREE.CylinderGeometry(1.2, 1.2, 0.02, 8);
-            propBlurGeo.rotateX(Math.PI / 2);
-            const propBlurMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.25 });
-            propeller = new THREE.Mesh(propBlurGeo, propBlurMat);
-            propeller.position.set(0, 0, -2.18);
-            airplane.add(propeller);
-
-            const propCoreGeo = new THREE.BoxGeometry(2.0, 0.1, 0.02);
-            const propCore = new THREE.Mesh(propCoreGeo, new THREE.MeshBasicMaterial({color: 0x333333}));
-            propeller.add(propCore);
-
-            airplane.position.set(0, 8, 0);
-            scene.add(airplane);
-        }
-
-        function generateStraightPath() {
-            let zPos = 0;
-            for (let i = 0; i < 600; i++) {
-                const roadGeo = new THREE.PlaneGeometry(8, 20);
-                const roadMat = new THREE.MeshLambertMaterial({ color: colors.road });
-                const roadSegment = new THREE.Mesh(roadGeo, roadMat);
-                
-                roadSegment.position.set(0, 0, zPos);
-                roadSegment.rotateX(-Math.PI / 2);
-                scene.add(roadSegment);
-
-                const sandMat = new THREE.MeshLambertMaterial({ color: colors.sand });
-                const leftSand = new THREE.Mesh(new THREE.PlaneGeometry(1.5, 20), sandMat);
-                leftSand.position.set(-4.75, 0, zPos);
-                leftSand.rotateX(-Math.PI / 2);
-                scene.add(leftSand);
-
-                const rightSand = leftSand.clone();
-                rightSand.position.x = 4.75;
-                scene.add(rightSand);
-
-                if (i % 4 === 0 && i > 4) { spawnGameplayElements(zPos); }
-                zPos -= 18; 
+            // İlk Yol Segmentlerini Üret
+            for (let i = 0; i < visibleSegments; i++) {
+                generateRoadSegment();
             }
+
+            // 2. ADIM'da modellenen uçağı çağır
+            buildBiplane();
+
+            window.addEventListener('resize', onWindowResize, false);
         }
 
-        function spawnGameplayElements(zPos) {
-            const randomY = 4 + Math.random() * 9; 
-            const randomX = (Math.random() - 0.5) * 6;
+        // --- ALGORİTMİK SONSUZ DÜMDÜZ YOL YAPISI ---
+        function generateRoadSegment() {
+            const segmentGroup = new THREE.Group();
+            const zPos = lastSegmentZ;
 
-            if (Math.random() > 0.25) {
-                const ringGeo = new THREE.TorusGeometry(1.6, 0.12, 8, 16);
-                const ringMat = new THREE.MeshLambertMaterial({ color: colors.ring });
-                const ring = new THREE.Mesh(ringGeo, ringMat);
-                ring.position.set(randomX, randomY, zPos);
-                scene.add(ring);
-                rings.push(ring);
-            } else {
-                const fuelGeo = new THREE.CylinderGeometry(0.4, 0.4, 1.0, 5);
-                const fuelMat = new THREE.MeshLambertMaterial({ color: colors.fuel });
-                const fuelCan = new THREE.Mesh(fuelGeo, fuelCan);
-                fuelCan.position.set(randomX, randomY, zPos);
-                scene.add(fuelCan);
-                fuelCans.push(fuelCan);
-            }
-        }
-
-        function createEnvironment() {
-            const groundGeo = new THREE.PlaneGeometry(2000, 12000);
-            const groundMat = new THREE.MeshLambertMaterial({ color: 0xb4c4b6 }); 
+            // Mat Yeşil Zemin
+            const groundGeo = new THREE.PlaneGeometry(300, segmentLength);
+            const groundMat = new THREE.MeshStandardMaterial({ color: 0x94a684, roughness: 0.9 });
             const ground = new THREE.Mesh(groundGeo, groundMat);
             ground.rotation.x = -Math.PI / 2;
-            ground.position.y = -0.1;
-            scene.add(ground);
-        }
+            ground.receiveShadow = true;
+            segmentGroup.add(ground);
 
-        function initPermissions() {
-            if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
-                DeviceOrientationEvent.requestPermission()
-                    .then(permissionState => {
-                        if (permissionState === 'granted') { window.addEventListener('deviceorientation', handleOrientation); }
-                    }).catch(console.error);
-            } else { window.addEventListener('deviceorientation', handleOrientation); }
-        }
+            // Sarı Toprak/Kum Şeritler (Yol kenarı)
+            const sandGeo = new THREE.PlaneGeometry(24, segmentLength);
+            const sandMat = new THREE.MeshStandardMaterial({ color: 0xe0ca9b, roughness: 0.8 });
+            const sand = new THREE.Mesh(sandGeo, sandMat);
+            sand.rotation.x = -Math.PI / 2;
+            sand.position.y = 0.01; 
+            segmentGroup.add(sand);
 
-        // --- QUATERNION TABANLI JİROSKOP KONTROL SENTEZİ ---
-        function handleOrientation(event) {
-            if (!gameActive) return;
+            // Dümdüz Asfalt Yol
+            const roadGeo = new THREE.PlaneGeometry(10, segmentLength);
+            const roadMat = new THREE.MeshStandardMaterial({ color: 0x4a4e69, roughness: 0.7 });
+            const road = new THREE.Mesh(roadGeo, roadMat);
+            road.rotation.x = -Math.PI / 2;
+            road.position.y = 0.02; // Z-fighting engelleme
+            road.receiveShadow = true;
+            segmentGroup.add(road);
 
-            let alpha = event.alpha; 
-            let beta = event.beta;   
-            let gamma = event.gamma; 
-
-            if (initialBeta === null && beta !== null) {
-                initialBeta = beta;
-                initialGamma = gamma;
-                initialAlpha = alpha;
+            // Beyaz Kesik Çizgiler (Yolun ortası)
+            for (let i = -segmentLength/2; i < segmentLength/2; i += 10) {
+                const lineGeo = new THREE.PlaneGeometry(0.3, 4);
+                const lineMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+                const line = new THREE.Mesh(lineGeo, lineMat);
+                line.rotation.x = -Math.PI / 2;
+                line.position.set(0, 0.03, i + 5);
+                segmentGroup.add(line);
             }
 
-            // 1. Yukarı/Aşağı Tilt -> Lokal Pitch Dönüş Hızı (Kafayı kaldırma/eğme)
-            let deltaBeta = initialBeta - beta;
-            targetPitchRate = deltaBeta * 0.0012; 
+            segmentGroup.position.z = zPos - segmentLength / 2;
+            environmentGroup.add(segmentGroup);
+            roadSegments.push(segmentGroup);
 
-            // 2. Sağa/Sola Kafa Çevirme -> Lokal Yaw Dönüş Hızı (Doğrultu değiştirme)
-            let deltaAlpha = alpha - initialAlpha;
-            if (deltaAlpha > 180) deltaAlpha -= 360;
-            if (deltaAlpha < -180) deltaAlpha += 360;
-            targetYawRate = deltaAlpha * 0.0015;
+            // Bu segmentin üzerine oyun elementleri yerleştir (İlk segment hariç)
+            if (zPos < 0) {
+                spawnGameplayElements(zPos);
+            }
 
-            // 3. Sağa/Sola Yana Yatırma -> Lokal Roll Dönüş Hızı (Kendi etrafında tam tur)
-            let deltaGamma = gamma - initialGamma;
-            // İstediğin zıt yön dengesine göre çarpanı ayarladık
-            targetRollRate = deltaGamma * -0.0025; 
+            lastSegmentZ -= segmentLength;
         }
 
-        function initAudioEngine() {
+        function updateInfiniRoad() {
+            // Uçak ilerledikçe arkada kalan yolu sil ve ileride yenisini yap
+            if (airplaneGroup.position.z < roadSegments[0].position.z - segmentLength) {
+                const oldSegment = roadSegments.shift();
+                environmentGroup.remove(oldSegment);
+                generateRoadSegment();
+            }
+        }
+
+        // --- 2. ADIM: PROCEDURAL LOW-POLY BIPLANE MODELLENMESİ ---
+        function buildBiplane() {
+            airplaneGroup = new THREE.Group();
+
+            const bodyMat = new THREE.MeshStandardMaterial({ color: 0x3d5a80, roughness: 0.5 }); // Havacı Mavisi
+            const wingMat = new THREE.MeshStandardMaterial({ color: 0xf4f1de, roughness: 0.6 }); // Mat Fildişi
+            const strutMat = new THREE.MeshStandardMaterial({ color: 0x293241 }); // Koyu Destekler
+            const glassMat = new THREE.MeshStandardMaterial({ color: 0x1d3557, roughness: 0.1, metalness: 0.9 });
+            const wheelMat = new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.9 });
+
+            // Aerodinamik Gövde
+            const fuselageGeo = new THREE.CylinderGeometry(0.5, 0.15, 4, 8);
+            fuselageGeo.rotateX(Math.PI / 2);
+            const fuselage = new THREE.Mesh(fuselageGeo, bodyMat);
+            fuselage.castShadow = true;
+            airplaneGroup.add(fuselage);
+
+            // Uçağın Burnu (Motor Bloğu)
+            const noseGeo = new THREE.ConeGeometry(0.5, 0.8, 8);
+            noseGeo.rotateX(-Math.PI / 2);
+            const nose = new THREE.Mesh(noseGeo, bodyMat);
+            nose.position.z = -2.4;
+            airplaneGroup.add(nose);
+
+            // Alt Kanat
+            const lowerWingGeo = new THREE.BoxGeometry(7, 0.1, 1.2);
+            const lowerWing = new THREE.Mesh(lowerWingGeo, wingMat);
+            lowerWing.position.set(0, -0.2, -0.4);
+            lowerWing.castShadow = true;
+            airplaneGroup.add(lowerWing);
+
+            // Üst Kanat
+            const upperWing = lowerWing.clone();
+            upperWing.position.y = 1.3;
+            upperWing.position.z = -0.6; // Biplane ileri ofseti
+            airplaneGroup.add(upperWing);
+
+            // Kanat Arası Dikey Bağlantı Direkleri (Struts)
+            const strutGeo = new THREE.CylinderGeometry(0.04, 0.04, 1.5, 4);
+            const positionsX = [-3, -1.5, 1.5, 3];
+            positionsX.forEach(x => {
+                const strutLeft = new THREE.Mesh(strutGeo, strutMat);
+                strutLeft.position.set(x, 0.55, -0.5);
+                airplaneGroup.add(strutLeft);
+            });
+
+            // Kuyruk Kanatları (Yatay ve Dikey)
+            const tailYawGeo = new THREE.BoxGeometry(0.1, 0.9, 0.6); // Dikey
+            const tailYaw = new THREE.Mesh(tailYawGeo, bodyMat);
+            tailYaw.position.set(0, 0.6, 1.8);
+            airplaneGroup.add(tailYaw);
+
+            const tailPitchGeo = new THREE.BoxGeometry(1.8, 0.08, 0.5); // Yatay
+            const tailPitch = new THREE.Mesh(tailPitchGeo, wingMat);
+            tailPitch.position.set(0, 0.2, 1.8);
+            airplaneGroup.add(tailPitch);
+
+            // Kokpit Camı
+            const cockpitGeo = new THREE.BoxGeometry(0.4, 0.3, 0.4);
+            const cockpit = new THREE.Mesh(cockpitGeo, glassMat);
+            cockpit.position.set(0, 0.5, -0.5);
+            airplaneGroup.add(cockpit);
+
+            // Tekerlekler
+            const wheelGeo = new THREE.CylinderGeometry(0.25, 0.25, 0.15, 8);
+            wheelGeo.rotateZ(Math.PI / 2);
+            const leftWheel = new THREE.Mesh(wheelGeo, wheelMat);
+            leftWheel.position.set(-0.6, -0.8, -1.2);
+            const rightWheel = leftWheel.clone();
+            rightWheel.position.x = 0.6;
+            airplaneGroup.add(leftWheel);
+            airplaneGroup.add(rightWheel);
+
+            // PERVANE VE MOTION BLUR DİSKİ
+            const blurGeo = new THREE.CylinderGeometry(1.2, 1.2, 0.02, 16);
+            blurGeo.rotateX(Math.PI / 2);
+            const blurMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.25 });
+            propellerBlur = new THREE.Group();
+            
+            const diskMesh = new THREE.Mesh(blurGeo, blurMat);
+            propellerBlur.add(diskMesh);
+
+            // Merkez Çapa Çizgisi (Dönüş takibi için ince kütle)
+            const coreLineGeo = new THREE.BoxGeometry(2.2, 0.06, 0.03);
+            const coreLineMat = new THREE.MeshBasicMaterial({ color: 0x222222 });
+            const coreLine = new THREE.Mesh(coreLineGeo, coreLineMat);
+            propellerBlur.add(coreLine);
+
+            propellerBlur.position.z = -2.82;
+            airplaneGroup.add(propellerBlur);
+
+            // Ölçekleme ve Sahneye Ekleme
+            airplaneGroup.scale.set(0.7, 0.7, 0.7);
+            airplaneGroup.position.set(0, 4, 0); // Başlangıç yüksekliği
+            scene.add(airplaneGroup);
+        }
+
+        // --- 3. ADIM: KUSURSUZ 6DOF QUATERNION KONTROL YAPISI ---
+        function setupControls() {
+            if (window.DeviceOrientationEvent) {
+                window.addEventListener('deviceorientation', function (e) {
+                    deviceOrientation.alpha = e.alpha ? THREE.MathUtils.degToRad(e.alpha) : 0;
+                    deviceOrientation.beta = e.beta ? THREE.MathUtils.degToRad(e.beta) : 0;
+                    deviceOrientation.gamma = e.gamma ? THREE.MathUtils.degToRad(e.gamma) : 0;
+                    
+                    if (!hasCalibrated && e.alpha !== null) {
+                        // İlk okumayı kalibrasyon noktası alıyoruz
+                        calibrateHeading();
+                    }
+                }, false);
+            }
+            
+            // Masaüstü Testleri için Klavye Yedek Kontrolleri
+            window.addEventListener('keydown', (e) => {
+                if(!isPlaying) return;
+                let localPitch = 0, localYaw = 0, localRoll = 0;
+                if (e.key === 'w' || e.key === 'ArrowUp') localPitch = -0.04;
+                if (e.key === 's' || e.key === 'ArrowDown') localPitch = 0.04;
+                if (e.key === 'a' || e.key === 'ArrowLeft') localRoll = -0.06;
+                if (e.key === 'd' || e.key === 'ArrowRight') localRoll = 0.06;
+                if (e.key === 'q') localYaw = 0.03;
+                if (e.key === 'e') localYaw = -0.03;
+                
+                applyLocalRotations(localPitch, localYaw, localRoll);
+            });
+        }
+
+        function calibrateHeading() {
+            initialOrientation.alpha = deviceOrientation.alpha;
+            initialOrientation.beta = deviceOrientation.beta;
+            initialOrientation.gamma = deviceOrientation.gamma;
+            hasCalibrated = true;
+        }
+
+        function updateFlightPhysics() {
+            if (!isPlaying) return;
+
+            if (hasCalibrated) {
+                // Kalibre edilmiş delta açıları hesapla
+                let deltaPitch = (deviceOrientation.beta - initialOrientation.beta) * 0.4;
+                let deltaRoll = (deviceOrientation.gamma - initialOrientation.gamma) * -0.5;
+                let deltaYaw = (deviceOrientation.alpha - initialOrientation.alpha) * 0.4;
+
+                // Eşik değerleri (ölü bölge kontrolü)
+                if(Math.abs(deltaPitch) < 0.02) deltaPitch = 0;
+                if(Math.abs(deltaRoll) < 0.02) deltaRoll = 0;
+                if(Math.abs(deltaYaw) < 0.02) deltaYaw = 0;
+
+                applyLocalRotations(deltaPitch * 0.1, deltaYaw * 0.1, deltaRoll * 0.1);
+            }
+
+            // Uçağı her zaman kendi lokal eksi Z eksenine (baktığı yöne) doğru ilerlet
+            const forwardVector = new THREE.Vector3(0, 0, -1);
+            forwardVector.applyQuaternion(airplaneGroup.quaternion);
+            airplaneGroup.position.addScaledVector(forwardVector, speed);
+
+            // Sınır Güvenliği: Uçağın yere çakılmasını veya uzaya gitmesini önle
+            if (airplaneGroup.position.y < 0.6) airplaneGroup.position.y = 0.6;
+            if (airplaneGroup.position.y > 45) airplaneGroup.position.y = 45;
+            if (airplaneGroup.position.x < -40) airplaneGroup.position.x = -40;
+            if (airplaneGroup.position.x > 40) airplaneGroup.position.x = 40;
+
+            // Kamera Takibi: Uçağın arkasından lokal yukarısını (up vector) referans alarak lerp ile sönümleme
+            const relativeCameraOffset = new THREE.Vector3(0, 1.8, 7.5);
+            const cameraOffset = relativeCameraOffset.applyQuaternion(airplaneGroup.quaternion);
+            const targetCamPos = airplaneGroup.position.clone().add(cameraOffset);
+            
+            // Sol ve Sağ kamerayı güncelle (Stereo IPD kaymasını koruyarak)
+            const currentIPDOffset = new THREE.Vector3(0.06, 0, 0).applyQuaternion(airplaneGroup.quaternion);
+            
+            leftCamera.position.lerp(targetCamPos.clone().sub(currentIPDOffset), 0.1);
+            rightCamera.position.lerp(targetCamPos.clone().add(currentIPDOffset), 0.1);
+            
+            // Kameralar uçağın önüne doğru baksın, uçağın lokal yukarısını tırmansın
+            const upVector = new THREE.Vector3(0, 1, 0).applyQuaternion(airplaneGroup.quaternion);
+            leftCamera.up.copy(upVector);
+            rightCamera.up.copy(upVector);
+            
+            leftCamera.lookAt(airplaneGroup.position.clone().add(new THREE.Vector3(0,0,-2).applyQuaternion(airplaneGroup.quaternion)));
+            rightCamera.lookAt(airplaneGroup.position.clone().add(new THREE.Vector3(0,0,-2).applyQuaternion(airplaneGroup.quaternion)));
+        }
+
+        // Gimbal Lock'u tamamen engelleyen Lokal Eksen Dönüş Fonksiyonu
+        function applyLocalRotations(pitch, yaw, roll) {
+            const qPitch = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), pitch);
+            const qYaw = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), yaw);
+            const qRoll = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), roll);
+
+            // Sırasıyla lokal eksenleri çarpıştırarak yönelimi güncelle
+            airplaneGroup.quaternion.multiply(qPitch).multiply(qYaw).multiply(qRoll);
+            airplaneGroup.quaternion.normalize();
+        }
+
+        // --- 4. ADIM: OYNANIŞ ELEMENTLERİ (HALKALAR VE BENZİN) ---
+        function spawnGameplayElements(zCenter) {
+            const itemCount = 3; // Her segment başına düşen nesne adedi
+            for (let i = 0; i < itemCount; i++) {
+                const isFuel = Math.random() < 0.25; // %25 ihtimalle benzin bidonu
+                
+                let objGeo, objMat;
+                if (!isFuel) {
+                    // Turuncu Halka
+                    objGeo = new THREE.TorusGeometry(1.4, 0.15, 8, 24);
+                    objMat = new THREE.MeshStandardMaterial({ color: 0xf95738, emissive: 0xf95738, emissiveIntensity: 0.3 });
+                } else {
+                    // Mor Benzin Bidonu (Minimalist Kutu)
+                    objGeo = new THREE.BoxGeometry(1.2, 1.6, 0.6);
+                    objMat = new THREE.MeshStandardMaterial({ color: 0x6a0dad, roughness: 0.4 });
+                }
+
+                const mesh = new THREE.Mesh(objGeo, objMat);
+                mesh.castShadow = true;
+
+                // Uçağın uçuş limitlerine uygun rastgele koordinatlar
+                const x = (Math.random() - 0.5) * 30;
+                const y = 3 + Math.random() * 15;
+                const z = zCenter - (Math.random() * segmentLength);
+
+                mesh.position.set(x, y, z);
+                mesh.userData = { isFuel: isFuel, checked: false, radius: isFuel ? 1.2 : 1.6 };
+
+                environmentGroup.add(mesh);
+                activeElements.push(mesh);
+            }
+        }
+
+        function updateGameplay() {
+            if (!isPlaying) return;
+
+            // Benzini Zamana Bağlı Olarak Azalt
+            fuel -= 0.04;
+            if (fuel <= 0) {
+                fuel = 0;
+                endGame();
+            }
+
+            // UI Bar Genişliklerini Güncelle
+            const bars = document.querySelectorAll('.fuel-bar');
+            bars.forEach(bar => bar.style.width = fuel + '%');
+
+            // Çarpışma Algılama (Bounding Sphere Mantığı)
+            const planePos = airplaneGroup.position;
+
+            for (let i = activeElements.length - 1; i >= 0; i--) {
+                const element = activeElements[i];
+                const dist = planePos.distanceTo(element.position);
+
+                // Nesne uçağın arkasında kaldı mı kontrolü
+                if (element.position.z > planePos.z + 10 && !element.userData.checked) {
+                    element.userData.checked = true;
+                    if (!element.userData.isFuel) {
+                        // Halka kaçırıldı, ceza puanı
+                        updateScore(-5);
+                    }
+                }
+
+                // Çarpışma Gerçekleşti mi?
+                if (dist < element.userData.radius + 1.0) {
+                    if (element.userData.isFuel) {
+                        fuel = Math.min(100, fuel + 30);
+                        triggerCoinSound(440, 'square'); // Yakıt alma sesi
+                    } else {
+                        updateScore(10);
+                        triggerCoinSound(880, 'sine'); // Halka geçiş sesi
+                    }
+
+                    // Sahneden ve diziden temizle
+                    environmentGroup.remove(element);
+                    activeElements.splice(i, 1);
+                    continue;
+                }
+
+                // Çok geride kalan nesneleri bellekten tamamen uçur
+                if (element.position.z > planePos.z + 50) {
+                    environmentGroup.remove(element);
+                    activeElements.splice(i, 1);
+                }
+            }
+        }
+
+        function updateScore(amount) {
+            score += amount;
+            if (score < 0) score = 0;
+            const scoreTexts = document.querySelectorAll('.score-val');
+            scoreTexts.forEach(txt => txt.innerText = score);
+        }
+
+        // --- 5. ADIM: DİNAMIK MOTOR SESİ VE C64 CHIPTUNE SYNTH ---
+        function initAudio() {
             audioCtx = new (window.AudioContext || window.webkitAudioContext)();
             
+            // --- Motor Sesi Sentezleyici ---
             motorOsc = audioCtx.createOscillator();
             motorGain = audioCtx.createGain();
-            const motorFilter = audioCtx.createBiquadFilter();
             
-            motorOsc.type = 'sawtooth';
-            motorOsc.frequency.setValueAtTime(45, audioCtx.currentTime); 
+            motorOsc.type = 'sawtooth'; // Kaba retro motor tınısı
+            motorOsc.frequency.setValueAtTime(65, audioCtx.currentTime); // Bas frekans
             
-            motorFilter.type = 'lowpass';
-            motorFilter.frequency.setValueAtTime(120, audioCtx.currentTime);
+            // Motor sesini yumuşatmak için alçak geçiren filtre
+            const filter = audioCtx.createBiquadFilter();
+            filter.type = 'lowpass';
+            filter.frequency.setValueAtTime(250, audioCtx.currentTime);
+
+            motorGain.gain.setValueAtTime(0.15, audioCtx.currentTime);
             
-            motorGain.gain.setValueAtTime(0.05, audioCtx.currentTime);
-            
-            motorOsc.connect(motorFilter);
-            motorFilter.connect(motorGain);
+            motorOsc.connect(filter);
+            filter.connect(motorGain);
             motorGain.connect(audioCtx.destination);
             motorOsc.start();
 
-            const c64Notes = [130.81, 146.83, 164.81, 196.00, 220.00, 196.00, 164.81, 146.83]; 
-            let noteIndex = 0;
+            // --- C64 Arpej Chiptune Döngüsü ---
+            // Commodore 64 tarzı hızlı 3'lü akor geçiş dizilimi
+            const melody = [146.83, 164.81, 196.00, 220.00, 293.66, 329.63]; 
+            let step = 0;
 
             bgmInterval = setInterval(() => {
-                if (!gameActive) return;
-                const synthOsc = audioCtx.createOscillator();
-                const synthGain = audioCtx.createGain();
+                if (!isPlaying) return;
                 
-                synthOsc.type = 'square'; 
-                synthOsc.frequency.setValueAtTime(c64Notes[noteIndex], audioCtx.currentTime);
-                synthOsc.frequency.exponentialRampToValueAtTime(c64Notes[noteIndex] * 2, audioCtx.currentTime + 0.12);
-
-                synthGain.gain.setValueAtTime(0.012, audioCtx.currentTime);
-                synthGain.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + 0.18);
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
                 
-                synthOsc.connect(synthGain);
-                synthGain.connect(audioCtx.destination);
+                osc.type = 'square'; // Karakteristik 8-bit kare dalga
+                // Hızlı arpej hissi için notaları karıştırarak çal
+                const note = melody[step % melody.length] * (step % 3 === 0 ? 1.5 : 1);
                 
-                synthOsc.start();
-                synthOsc.stop(audioCtx.currentTime + 0.2);
+                osc.frequency.setValueAtTime(note, audioCtx.currentTime);
+                gain.gain.setValueAtTime(0.04, audioCtx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + 0.18);
                 
-                noteIndex = (noteIndex + 1) % c64Notes.length;
-            }, 200);
+                osc.connect(gain);
+                gain.connect(audioCtx.destination);
+                osc.start();
+                osc.stop(audioCtx.currentTime + 0.2);
+                
+                step++;
+            }, 150); // Hızlı C64 temposu
         }
 
-        function playScoreSound() {
-            if (!audioCtx) return;
+        function updateAudioPitch() {
+            if (!isPlaying || !motorOsc) return;
+
+            // Uçağın dünyadaki yönelim vektörünü al
+            const dir = new THREE.Vector3(0, 0, -1).applyQuaternion(airplaneGroup.quaternion);
+            
+            // dir.y uçağın tırmanma (pitch) eğilimidir. +1 tam yukarı, -1 tam aşağı.
+            const pitchFactor = dir.y; 
+
+            // Tırmanırken motor zorlanma perdesi (Frekans yükselir ve gürleşir)
+            // İnerken motor rahatlar (Frekans düşer ve fısıldar)
+            const targetFreq = 65 + (pitchFactor * 45);
+            const targetVolume = 0.15 + (pitchFactor * 0.08);
+
+            motorOsc.frequency.setTargetAtTime(targetFreq, audioCtx.currentTime, 0.1);
+            motorGain.gain.setTargetAtTime(targetVolume, audioCtx.currentTime, 0.1);
+        }
+
+        function triggerCoinSound(freq, type) {
+            if(!audioCtx) return;
             const osc = audioCtx.createOscillator();
             const gain = audioCtx.createGain();
-            osc.type = 'triangle';
-            osc.frequency.setValueAtTime(600, audioCtx.currentTime);
-            osc.frequency.setValueAtTime(950, audioCtx.currentTime + 0.08); 
-            gain.gain.setValueAtTime(0.08, audioCtx.currentTime);
-            gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.3);
+            
+            osc.type = type;
+            osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+            // Nostaljik coin efekti için frekansı hızlıca yukarı fırlat
+            osc.frequency.exponentialRampToValueAtTime(freq * 2, audioCtx.currentTime + 0.08);
+            
+            gain.gain.setValueAtTime(0.2, audioCtx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.25);
+            
             osc.connect(gain);
             gain.connect(audioCtx.destination);
             osc.start();
             osc.stop(audioCtx.currentTime + 0.3);
         }
 
-        let clock = new THREE.Clock();
-
+        // --- ANA DÖNGÜ VE YARDIMCI METOTLAR ---
         function animate() {
             requestAnimationFrame(animate);
 
-            if (gameActive) {
-                const delta = clock.getDelta();
-                speed = 0.8 + (180 - timeLeft) * 0.002;
+            if (isPlaying) {
+                // Pervaneyi ve çapa çizgisini döndür
+                if (propellerBlur) propellerBlur.rotation.z += 0.8;
 
-                // Giriş yumuşatmaları (Lerp)
-                currentPitchRate += (targetPitchRate - currentPitchRate) * lerpFactor;
-                currentYawRate += (targetYawRate - currentYawRate) * lerpFactor;
-                currentRollRate += (targetRollRate - currentRollRate) * lerpFactor;
-
-                // --- DİNAMİK MOTOR SESİ GÜNCELLEMESİ ---
-                if(motorOsc && motorGain) {
-                    let pitchFactor = Math.max(-0.5, Math.min(1.5, currentPitchRate * 80.0)); 
-                    motorOsc.frequency.setTargetAtTime(45 + (pitchFactor * 40), audioCtx.currentTime, 0.1);
-                    motorGain.gain.setTargetAtTime(0.05 + (pitchFactor * 0.03), audioCtx.currentTime, 0.1);
-                }
-
-                // --- KUSURSUZ 6DoF QUATERNION MATRİS SENTEZLEMESİ ---
-                // Uçağın o anki yönelimini temsil eden lokal eksen vektörleri
-                const localX = new THREE.Vector3(1, 0, 0).applyQuaternion(airplane.quaternion);
-                const localY = new THREE.Vector3(0, 1, 0).applyQuaternion(airplane.quaternion);
-                const localZ = new THREE.Vector3(0, 0, 1).applyQuaternion(airplane.quaternion);
-
-                // Her bir eksen dönüşünü bağımsız birer Quaternion olarak üretiyoruz
-                const pitchQuat = new THREE.Quaternion().setFromAxisAngle(localX, currentPitchRate);
-                const yawQuat = new THREE.Quaternion().setFromAxisAngle(localY, currentYawRate);
-                const rollQuat = new THREE.Quaternion().setFromAxisAngle(localZ, currentRollRate);
-
-                // Tüm dönüşleri uçağın mevcut yönelimiyle sırayla çarpıp sentezliyoruz (Kilitlenme imkansızdır)
-                airplane.quaternion.multiplyQuaternions(pitchQuat, airplane.quaternion);
-                airplane.quaternion.multiplyQuaternions(yawQuat, airplane.quaternion);
-                airplane.quaternion.multiplyQuaternions(rollQuat, airplane.quaternion);
-
-                // Uçak kendi baktığı lokal ileri doğrultusunda (Lokal eksi Z) hareket eder
-                const forwardVector = new THREE.Vector3(0, 0, -1).applyQuaternion(airplane.quaternion);
-                airplane.position.addScaledVector(forwardVector, speed);
-
-                propeller.rotation.z += 0.6;
-
-                // Kameranın arkadan takibi (Uçağın arkasında sabit bir lokal noktayı takip eder)
-                const relativeCameraOffset = new THREE.Vector3(0, 2.4, 10).applyQuaternion(airplane.quaternion);
-                const targetCamPos = airplane.position.clone().add(relativeCameraOffset);
-                camera.position.lerp(targetCamPos, 0.1);
-                
-                // Kameranın her zaman uçağın lokal yukarısını tavan kabul ederek bakmasını sağlıyoruz
-                const cameraUpVector = new THREE.Vector3(0, 1, 0).applyQuaternion(airplane.quaternion);
-                camera.up.copy(cameraUpVector);
-                camera.lookAt(airplane.position.clone().add(new THREE.Vector3(0, 0.6, 0).applyQuaternion(airplane.quaternion)));
-
-                // Çevre ve Zaman Akışı
-                const progress = (180 - timeLeft) / 180;
-                scene.background.lerpColors(new THREE.Color(colors.skyDay), new THREE.Color(colors.skySunset), progress);
-
-                fuel -= delta * 0.55;
-                document.querySelectorAll('.fuel-bar').forEach(bar => bar.style.width = `${Math.max(0, fuel)}%`);
-                
-                if (fuel <= 0) gameOver("Benzin Bitti!");
-
-                checkCollisions();
-                updateTimer();
+                updateFlightPhysics();
+                updateInfiniRoad();
+                updateGameplay();
+                updateAudioPitch();
             }
 
-            if(stereoEffect) { stereoEffect.render(scene, camera); } 
-            else { renderer.render(scene, camera); }
-        }
+            // EKRANI ORTADAN İKİYE BÖLEN STEREO VIEW RENDER DÖNGÜSÜ
+            const width = window.innerWidth;
+            const height = window.innerHeight;
 
-        function checkCollisions() {
-            const planePos = airplane.position;
-            rings.forEach((ring, index) => {
-                if (planePos.distanceTo(ring.position) < 2.2) {
-                    scene.remove(ring); rings.splice(index, 1); score += 10;
-                    updateUIScore(); playScoreSound();
-                } else if (planePos.z < ring.position.z - 10) { // Dümdüz ileri gittiği için arkada kalanları siler
-                    scene.remove(ring); rings.splice(index, 1);
-                    score = Math.max(0, score - 5); updateUIScore();
-                }
-            });
-            fuelCans.forEach((can, index) => {
-                if (planePos.distanceTo(can.position) < 2.0) {
-                    scene.remove(can); fuelCans.splice(index, 1);
-                    fuel = Math.min(100, fuel + 30); playScoreSound();
-                } else if (planePos.z < can.position.z - 10) { scene.remove(can); fuelCans.splice(index, 1); }
-            });
-        }
+            renderer.setScissorTest(true);
 
-        function updateUIScore() {
-            document.querySelectorAll('.score-txt').forEach(txt => txt.innerText = score);
-        }
+            // Sol Göz Görünümü (Ekranın Sol Yarısı)
+            renderer.setViewport(0, 0, width / 2, height);
+            renderer.setScissor(0, 0, width / 2, height);
+            renderer.render(scene, leftCamera);
 
-        function updateTimer() {
-            timeLeft -= 0.016; 
-            if(timeLeft <= 0) { timeLeft = 0; gameOver("Uçuş Başarıyla Tamamlandı!"); }
-            const mins = Math.floor(timeLeft / 60);
-            const secs = Math.floor(timeLeft % 60);
-            const timeStr = `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
-            document.querySelectorAll('.time-txt').forEach(txt => txt.innerText = timeStr);
-        }
+            // Sağ Göz Görünümü (Ekranın Sağ Yarısı)
+            renderer.setViewport(width / 2, 0, width / 2, height);
+            renderer.setScissor(width / 2, 0, width / 2, height);
+            renderer.render(scene, rightCamera);
 
-        function gameOver(message) {
-            gameActive = false;
-            if (bgmInterval) clearInterval(bgmInterval);
-            if (motorOsc) { try { motorOsc.stop(); } catch(e){} }
-            if (wakeLock !== null) { wakeLock.release().then(() => wakeLock = null); }
-            alert(`${message}\nToplam Skorunuz: ${score}`);
-            window.location.reload();
+            renderer.setScissorTest(false);
         }
 
         function onWindowResize() {
-            camera.aspect = window.innerWidth / window.innerHeight;
-            camera.updateProjectionMatrix();
-            renderer.setSize(window.innerWidth, window.innerHeight);
+            const width = window.innerWidth;
+            const height = window.innerHeight;
+            
+            leftCamera.aspect = (width / 2) / height;
+            leftCamera.updateProjectionMatrix();
+            
+            rightCamera.aspect = (width / 2) / height;
+            rightCamera.updateProjectionMatrix();
+            
+            renderer.setSize(width, height);
         }
 
+        function endGame() {
+            isPlaying = false;
+            if (motorOsc) motorOsc.stop();
+            clearInterval(bgmInterval);
+            document.getElementById('final-score').innerText = "Toplam Skor: " + score;
+            document.getElementById('game-over').style.display = 'flex';
+        }
+
+        // Oyun Başlatma Tetikleyicisi
+        document.getElementById('start-btn').addEventListener('click', function() {
+            document.getElementById('overlay').style.display = 'none';
+            isPlaying = true;
+            
+            // Mobil tarayıcılarda ses ve tam ekran izni için kullanıcı etkileşimi şarttır
+            if (typeof DeviceOrientationEvent.requestPermission === 'function') {
+                DeviceOrientationEvent.requestPermission()
+                    .then(permissionState => {
+                        if (permissionState === 'granted') {
+                            calibrateHeading();
+                        }
+                    })
+                    .catch(console.error);
+            } else {
+                calibrateHeading();
+            }
+
+            if (!audioCtx) {
+                initAudio();
+            }
+        });
+
+        // Sihirli Başlangıç
         init();
+        setupControls();
+        animate();
+
     </script>
 </body>
 </html>
