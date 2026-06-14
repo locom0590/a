@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>VR Pırpır Uçak - Commodore 64 Edition</title>
+    <title>VR Pırpır Uçak - Arkadan Görünüş Sabit</title>
     <style>
         * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
         body, html {
@@ -44,7 +44,7 @@
 
     <div id="vr-overlay">
         <h2>C64 VR PIRPIR UÇAK</h2>
-        <p>Lütfen telefonu yatay konuma getirin ve Başlat'a basın.<br>(Sesler otomatik açılacaktır)</p>
+        <p>Lütfen telefonu yatay konuma getirin ve Başlat'a basın.<br>(Uçak arkadan görünüm moduna alındı)</p>
         <button class="vr-start-btn" id="btn-start">VR MODUNU BAŞLAT</button>
     </div>
 
@@ -70,31 +70,25 @@
 
         // --- OYUN MEKANİĞİ DEĞİŞKENLERİ ---
         let airplane;             
-        let propeller;            // Pervane objesi (döndürmek için)
+        let propeller;            
         let rings = [];           
         let score = 0;
         
-        // Hız %30 azaltıldı (0.6 * 0.7 = 0.42)
         const GAME_SPEED = 0.42;    
         const MIN_HEIGHT = 2.0;   
         const MAX_HEIGHT = 16.0;  
-        const MAX_SIDE = 6.0;     // Sağ-sol rastgelelik sınırı
+        const MAX_SIDE = 6.0;     
 
-        // --- SES SENTEZLEYİCİLERİ (8-BIT COMMODORE 64 STİLİ) ---
+        // --- SES SENTEZLEYİCİLERİ ---
         let audioCtx, motorOsc, motorGain;
 
         function initAudio() {
             audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-            
-            // Retro Motor Sesi (Kaba kare dalga kullanımı)
             motorOsc = audioCtx.createOscillator();
             motorGain = audioCtx.createGain();
-            
-            motorOsc.type = 'square'; // C64 SID çipi benzeri kaba ses
-            motorOsc.frequency.setValueAtTime(55, audioCtx.currentTime); // Düşük pırpır frekansı
-            
-            motorGain.gain.setValueAtTime(0.08, audioCtx.currentTime); // Kulak tırmalamayacak seviye
-            
+            motorOsc.type = 'square'; 
+            motorOsc.frequency.setValueAtTime(55, audioCtx.currentTime); 
+            motorGain.gain.setValueAtTime(0.08, audioCtx.currentTime); 
             motorOsc.connect(motorGain);
             motorGain.connect(audioCtx.destination);
             motorOsc.start();
@@ -102,18 +96,14 @@
 
         function playRetroScoreSound() {
             if(!audioCtx) return;
-            // 8-bit Arpej Başarı Sesi (Hızlıca yükselen iki nota)
             let now = audioCtx.currentTime;
             let osc = audioCtx.createOscillator();
             let gain = audioCtx.createGain();
-            
             osc.type = 'triangle';
-            osc.frequency.setValueAtTime(440, now); // La notası
-            osc.frequency.setValueAtTime(880, now + 0.08); // Bir oktav üstü
-            
+            osc.frequency.setValueAtTime(440, now); 
+            osc.frequency.setValueAtTime(880, now + 0.08); 
             gain.gain.setValueAtTime(0.15, now);
             gain.gain.exponentialRampToValueAtTime(0.01, now + 0.25);
-            
             osc.connect(gain);
             gain.connect(audioCtx.destination);
             osc.start();
@@ -148,10 +138,10 @@
         // --- 2. ANA KURULUM ---
         function init() {
             scene = new THREE.Scene();
-            // Açık Mavi Gökyüzü ve Atmosfer Sisi
             scene.background = new THREE.Color(0x87ceeb);
             scene.fog = new THREE.FogExp2(0x87ceeb, 0.012);
 
+            // Kamera Konumu: Uçağın tam arkasında (Z ekseninde arkada: +8)
             camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 500);
             camera.position.set(0, 5, 8); 
             scene.add(camera);
@@ -169,7 +159,6 @@
             effect.setEyeSeparation(0.064); 
             effect.setSize(window.innerWidth, window.innerHeight);
 
-            // Güneş Işığı etkisi
             const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
             scene.add(ambientLight);
             const dirLight = new THREE.DirectionalLight(0xfffaed, 0.8);
@@ -187,7 +176,7 @@
         function createAsphalt() {
             const roadGeo = new THREE.PlaneGeometry(16, 1000);
             const roadMat = new THREE.MeshStandardMaterial({ 
-                color: 0x444446, // Klasik mat gri asfalt
+                color: 0x444446, 
                 roughness: 0.9
             });
             let asphaltRoad = new THREE.Mesh(roadGeo, roadMat);
@@ -195,7 +184,6 @@
             asphaltRoad.position.set(0, 0, -400);  
             scene.add(asphaltRoad);
 
-            // Retro yol çizgileri
             const lineGeo = new THREE.PlaneGeometry(0.3, 1000);
             const lineMat = new THREE.MeshBasicMaterial({ color: 0xeeeeee });
             
@@ -210,69 +198,66 @@
             scene.add(rightLine);
         }
 
-        // Retro Pırpır Uçak Tasarımı
+        // Uçağın Yönü Düzeltildi (Arkası Kameraya Dönük)
         function createPırpırAirplane() {
             airplane = new THREE.Group();
 
-            // Ana Gövde (Sarı Nostaljik Gövde)
+            // Ana Gövde (Yönü arkaya bakacak şekilde Math.PI / 2 ile yatırıldı)
             const bodyGeo = new THREE.CylinderGeometry(0.5, 0.3, 3.5, 8);
-            const bodyMat = new THREE.MeshStandardMaterial({ color: 0xfacc15, flatShading: true }); // Canlı Sarı
+            const bodyMat = new THREE.MeshStandardMaterial({ color: 0xfacc15, flatShading: true }); 
             const body = new THREE.Mesh(bodyGeo, bodyMat);
-            body.rotation.x = Math.PI / 2; 
+            body.rotation.x = -Math.PI / 2; // DÜZELTME: Eksi yön verilerek kuyruk arkaya getirildi
             airplane.add(body);
 
-            // Çift Kanat Yapısı (Biplane - Klasik Pırpır Uçak Ruhu)
-            const wingMat = new THREE.MeshStandardMaterial({ color: 0xea580c, flatShading: true }); // Turuncu Kanatlar
+            // Çift Kanat Yapısı (Kameraya göre uçağın ön kısmına yerleştirildi)
+            const wingMat = new THREE.MeshStandardMaterial({ color: 0xea580c, flatShading: true }); 
             const wingGeo = new THREE.BoxGeometry(5.5, 0.08, 0.9);
             
             const bottomWing = new THREE.Mesh(wingGeo, wingMat);
-            bottomWing.position.set(0, -0.2, 0.5);
+            bottomWing.position.set(0, -0.2, -0.5); // DÜZELTME: Ön tarafa kaydırıldı (-Z)
             airplane.add(bottomWing);
 
             const topWing = new THREE.Mesh(wingGeo, wingMat);
-            topWing.position.set(0, 0.6, 0.5);
+            topWing.position.set(0, 0.6, -0.5); // DÜZELTME: Ön tarafa kaydırıldı (-Z)
             airplane.add(topWing);
 
-            // Kanat Arası Destek Direkleri
             const strutGeo = new THREE.BoxGeometry(0.05, 0.8, 0.05);
             const strutMat = new THREE.MeshStandardMaterial({ color: 0x1e293b });
-            const leftStrut = new THREE.Mesh(strutGeo, strutMat); leftStrut.position.set(-2.2, 0.2, 0.5); airplane.add(leftStrut);
-            const rightStrut = new THREE.Mesh(strutGeo, strutMat); rightStrut.position.set(2.2, 0.2, 0.5); airplane.add(rightStrut);
+            const leftStrut = new THREE.Mesh(strutGeo, strutMat); leftStrut.position.set(-2.2, 0.2, -0.5); airplane.add(leftStrut);
+            const rightStrut = new THREE.Mesh(strutGeo, strutMat); rightStrut.position.set(2.2, 0.2, -0.5); airplane.add(rightStrut);
 
-            // Kuyruk
+            // Kuyruk Kanadı (Kameraya yakın olan arka tarafa alındı)
             const tailGeo = new THREE.BoxGeometry(0.05, 0.7, 0.5);
             const tail = new THREE.Mesh(tailGeo, wingMat);
-            tail.position.set(0, 0.4, -1.4);
+            tail.position.set(0, 0.4, 1.4); // DÜZELTME: Arka tarafa çekildi (+Z)
             airplane.add(tail);
 
-            // Motor Bloğu (Öndeki Siyah Kısım)
+            // Motor Bloğu (Önde, bizden uzak olan kısım)
             const motorGeo = new THREE.CylinderGeometry(0.45, 0.45, 0.5, 8);
             const motorMat = new THREE.MeshStandardMaterial({ color: 0x1e293b });
             const motorBloğu = new THREE.Mesh(motorGeo, motorMat);
             motorBloğu.rotation.x = Math.PI / 2;
-            motorBloğu.position.z = 1.8;
+            motorBloğu.position.z = -1.8; // DÜZELTME: İleriye alındı (-Z)
             airplane.add(motorBloğu);
 
-            // Pervane (Dönecek Olan Parça)
+            // Pervane (En önde dönüyor)
             const propGeo = new THREE.BoxGeometry(1.8, 0.15, 0.04);
             const propMat = new THREE.MeshStandardMaterial({ color: 0xffffff });
             propeller = new THREE.Mesh(propGeo, propMat);
-            propeller.position.z = 2.1; // Motorun hemen önüne koy
+            propeller.position.z = -2.1; // DÜZELTME: En ileriye alındı (-Z)
             airplane.add(propeller);
 
             airplane.position.set(0, 4, 0); 
             scene.add(airplane);
         }
 
-        // Tamamen Rastgele Konumlu Halkalar (Sağ-Sol, Üst-Alt Karma)
+        // Rastgele Konumlu Halkalar (-Z yönünden geliyorlar)
         function spawnInitialRings() {
             const ringGeo = new THREE.TorusGeometry(1.8, 0.15, 8, 20);
-            const ringMat = new THREE.MeshBasicMaterial({ color: 0xff0055, wireframe: true }); // Belirgin Kırmızı/Pembe neon halka
+            const ringMat = new THREE.MeshBasicMaterial({ color: 0xff0055, wireframe: true }); 
 
             for (let i = 0; i < 10; i++) {
                 const ring = new THREE.Mesh(ringGeo, ringMat);
-                
-                // İSTEDİĞİN ÖZELLİK: Sağ, sol, alt, üst tamamen rastgele koordinatlar
                 const randomX = (Math.random() - 0.5) * (MAX_SIDE * 2);
                 const randomY = MIN_HEIGHT + Math.random() * (MAX_HEIGHT - MIN_HEIGHT);
                 
@@ -286,7 +271,7 @@
         function animate() {
             requestAnimationFrame(animate);
 
-            // 1. ÇEKİRDEK ADIM: Sensör Oryantasyon (Değişmez Güvenli Bölge)
+            // 1. ÇEKİRDEK ADIM: Sensör Oryantasyon
             const orient = window.orientation ? THREE.MathUtils.degToRad(window.orientation) : 0;
             calibratedTarget.copy(rawSensorQuaternion);
             calibratedTarget.multiply(worldTransform);
@@ -294,57 +279,53 @@
             calibratedTarget.premultiply(sensorBiasQuaternion);
             currentQuaternion.slerp(calibratedTarget, SMOOTH_FACTOR);
 
-            // 2. ADIM: SADECE DİKEY VE YATAY DEĞERLERİ AYIKLAMA
+            // 2. ADIM: DİKEY VE YATAY HAREKET AYIKLAMA
             const euler = new THREE.Euler().setFromQuaternion(currentQuaternion, 'YXZ');
             
-            // Başın dikey hareketinden uçağın YÜKSEKLİĞİNİ türet
+            // Başın dikey hareketinden yükseklik kontrolü
             let targetHeight = 4 + (euler.x * 12); 
             targetHeight = THREE.MathUtils.clamp(targetHeight, MIN_HEIGHT, MAX_HEIGHT);
             airplane.position.y = THREE.MathUtils.lerp(airplane.position.y, targetHeight, 0.1);
 
-            // Başın sağa/sola yatmasından ya da dönmesinden uçağın YAN (X) hareketini türet (Hafif ve kontrollü)
-            let targetSide = -euler.y * 10;
+            // DÜZELTME: Arkadan bakışta sağ-sol jiroskop yönü senkronize edildi (euler.y'nin işareti düzeltildi)
+            let targetSide = euler.y * 10; 
             targetSide = THREE.MathUtils.clamp(targetSide, -MAX_SIDE, MAX_SIDE);
             airplane.position.x = THREE.MathUtils.lerp(airplane.position.x, targetSide, 0.1);
 
-            // Görsel Detaylar: Uçağın dönüş ve tırmanış açıları, pervanenin dönmesi
+            // Animasyonlar ve Pervane Dönüşü
             airplane.rotation.x = (targetHeight - airplane.position.y) * 0.15;
-            airplane.rotation.z = -(targetSide - airplane.position.x) * 0.2; // Sağa dönerken hafif kanat yatırma efekti
+            airplane.rotation.z = (targetSide - airplane.position.x) * 0.2; 
             
-            if(propeller) propeller.rotation.z += 0.4; // Pervaneyi deli gibi döndür
+            if(propeller) propeller.rotation.z += 0.4; 
 
-            // Dinamik Motor Sesi Simülasyonu: Uçak yükselirken motor zorlansın (pitch artsın)
+            // Dinamik Motor Sesi
             if(motorOsc) {
                 motorOsc.frequency.setValueAtTime(50 + (airplane.position.y * 3), audioCtx.currentTime);
             }
 
-            // 3. ADIM: HALKALARI YÜRÜTME VE ÇARPIŞMA (KOLİZYON) KONTROLÜ
+            // 3. ADIM: HALKA HAREKETLERİ VE KOLİZYON
             rings.forEach((ring) => {
                 ring.position.z += GAME_SPEED; 
 
-                // Tam uçağın hizasına geldiğinde 3 boyutlu mesafe kontrolü
                 if (Math.abs(ring.position.z - airplane.position.z) < GAME_SPEED) {
                     const distToPlane = airplane.position.distanceTo(ring.position);
                     
-                    // Halka yarıçapı ve uçağın gövde toleransı dahilinde içinden geçildi mi?
                     if (distToPlane < 2.3 && ring.visible) { 
                         ring.visible = false;
                         score += 10;
                         scoreBoard.innerText = "SCORE: " + String(score).padStart(4, '0');
                         
-                        playRetroScoreSound(); // C64 sesini patlat
+                        playRetroScoreSound(); 
                         
-                        // Flaş efekti
                         scene.background = new THREE.Color(0xffffff);
                         setTimeout(() => { scene.background = new THREE.Color(0x87ceeb); }, 60);
                     }
                 }
 
-                // Arkada kalan halkayı yeni rastgele uzay koordinatlarıyla ileriye ışınla
                 if (ring.position.z > 10) {
                     ring.position.z = -390; 
-                    ring.position.x = (Math.random() - 0.5) * (MAX_SIDE * 2); // Sağ/Sol tamamen random
-                    ring.position.y = MIN_HEIGHT + Math.random() * (MAX_HEIGHT - MIN_HEIGHT); // Alt/Üst tamamen random
+                    ring.position.x = (Math.random() - 0.5) * (MAX_SIDE * 2); 
+                    ring.position.y = MIN_HEIGHT + Math.random() * (MAX_HEIGHT - MIN_HEIGHT); 
                     ring.visible = true;
                 }
             });
@@ -377,7 +358,7 @@
             scoreBoard.style.display = 'block';
 
             init();
-            initAudio(); // Ses motorunu tarayıcı kilidine takılmadan başlat
+            initAudio(); 
             animate();
         });
 
