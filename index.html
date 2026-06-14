@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>Zen VR Biplane - Akışkan 6DoF</title>
+    <title>Zen VR Biplane - Akışkan & Kısıtlı</title>
     <style>
         * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
         body, html {
@@ -101,20 +101,20 @@
         let score = 0;
         let fuel = 100;
         let isPlaying = false;
-        const speed = 0.6; // Akışkan ve kontrollü ileri hız
+        const speed = 0.36; // %40 azaltılmış pürüzsüz akış hızı (0.6 * 0.6)
         
         let airplaneGroup, propellerBlur, environmentGroup;
         let roadSegments = [], activeElements = [];
         let lastSegmentZ = 0;
         const segmentLength = 100, visibleSegments = 5;
 
-        // --- ASLA BOZULMAYACAK ÇEKİRDEK JIROSROP MATRİS MİMARİSİ ---
+        // --- JIROSROP SENSÖR FÜZYON MATRİSLERİ ---
         let rawSensorQuaternion = new THREE.Quaternion();
         let calibratedTarget = new THREE.Quaternion();   
         let currentQuaternion = new THREE.Quaternion();  
         let sensorBiasQuaternion = new THREE.Quaternion();
         
-        const SMOOTH_FACTOR = 0.05; // Akışkan dönüş sönümleme katsayısı
+        const SMOOTH_FACTOR = 0.05; 
         const zee = new THREE.Vector3(0, 0, 1);
         const worldTransform = new THREE.Quaternion(-Math.sqrt(0.5), 0, 0, Math.sqrt(0.5));
 
@@ -153,7 +153,7 @@
             } catch (err) { console.log(err.message); }
         }
 
-        // --- SAHNE VE STEREO RETİNA KURULUMU ---
+        // --- SAHNE KURULUMU ---
         function init() {
             scene = new THREE.Scene();
             scene.background = new THREE.Color(0xf0ebd8);
@@ -165,7 +165,6 @@
             renderer.shadowMap.enabled = true;
             container.appendChild(renderer.domElement);
             
-            // Stereo Kameralar (IPD Mesafe Ayarı)
             leftCamera = new THREE.PerspectiveCamera(60, (window.innerWidth / 2) / window.innerHeight, 0.1, 1000);
             rightCamera = new THREE.PerspectiveCamera(60, (window.innerWidth / 2) / window.innerHeight, 0.1, 1000);
             
@@ -188,7 +187,7 @@
             window.addEventListener('resize', onWindowResize, false);
         }
 
-        // --- PROCEDURAL DÜMDÜZ SONSUZ YOL ---
+        // --- SONSUZ PROSEDÜREL YOL ---
         function generateRoadSegment() {
             const segmentGroup = new THREE.Group();
             const zPos = lastSegmentZ;
@@ -207,6 +206,7 @@
             sand.position.y = 0.01; 
             segmentGroup.add(sand);
 
+            // 10 Birim Genişliğindeki Asfalt Yol (X ekseninde -5 ile +5 arasına denk gelir)
             const roadGeo = new THREE.PlaneGeometry(10, segmentLength);
             const roadMat = new THREE.MeshStandardMaterial({ color: 0x4a4e69, roughness: 0.7 });
             const road = new THREE.Mesh(roadGeo, roadMat);
@@ -242,7 +242,7 @@
             }
         }
 
-        // --- PROCEDURAL LOW-POLY BIPLANE MODELLENMESİ ---
+        // --- LOW-POLY BIPLANE MODELLENMESİ ---
         function buildBiplane() {
             airplaneGroup = new THREE.Group();
 
@@ -328,40 +328,39 @@
             scene.add(airplaneGroup);
         }
 
-        // --- AKIŞKAN 6DOF FLIGHT PHYSICS ---
+        // --- AKIŞKAN FLIGHT PHYSICS VE SINIRLANDIRMA MANTIĞI ---
         function updateFlightPhysics() {
             if (!isPlaying) return;
 
-            // Jiroskop verisini pürüzsüzce harmanlayarak uçağa giydir
             const orient = window.orientation ? THREE.MathUtils.degToRad(window.orientation) : 0;
             calibratedTarget.copy(rawSensorQuaternion);
             calibratedTarget.multiply(worldTransform);
             calibratedTarget.multiply(new THREE.Quaternion().setFromAxisAngle(zee, -orient));
             calibratedTarget.premultiply(sensorBiasQuaternion);
 
-            // Slerp ile sönümleme ve akışkan dönüş
             currentQuaternion.slerp(calibratedTarget, SMOOTH_FACTOR);
             airplaneGroup.quaternion.copy(currentQuaternion);
 
-            // Uçağı baktığı yerel yönde sürekli ilerlet
             const forwardVector = new THREE.Vector3(0, 0, -1).applyQuaternion(airplaneGroup.quaternion);
             airplaneGroup.position.addScaledVector(forwardVector, speed);
 
-            // Sınırlar
+            // 1. KISITLAMA: Uçağın asfalt yolun (Genişlik: 10 birim, Sol: -5, Sağ: +5) dışına çıkmasını engelleme
+            const roadBoundX = 4.3; // Kanat genişliği ve tolerans payı düşülmüş güvenli X sınırı
+            if (airplaneGroup.position.x < -roadBoundX) airplaneGroup.position.x = -roadBoundX;
+            if (airplaneGroup.position.x > roadBoundX) airplaneGroup.position.x = roadBoundX;
+
+            // Yükseklik limitleri
             if (airplaneGroup.position.y < 0.8) airplaneGroup.position.y = 0.8;
             if (airplaneGroup.position.y > 40) airplaneGroup.position.y = 40;
-            if (airplaneGroup.position.x < -35) airplaneGroup.position.x = -35;
-            if (airplaneGroup.position.x > 35) airplaneGroup.position.x = 35;
 
             // AKIŞKAN PÜRÜZSÜZ KAMERA TAKİBİ
             const relativeCameraOffset = new THREE.Vector3(0, 1.6, 7.0);
             const cameraOffset = relativeCameraOffset.applyQuaternion(airplaneGroup.quaternion);
             const targetCamPos = airplaneGroup.position.clone().add(cameraOffset);
             
-            const ipd = 0.06; // Sol/Sağ göz kayma toleransı
+            const ipd = 0.06; 
             const currentIPDOffset = new THREE.Vector3(ipd, 0, 0).applyQuaternion(airplaneGroup.quaternion);
             
-            // Kameraları hedeflenen pozisyona yumuşakça yaklaştır (Lerp)
             leftCamera.position.lerp(targetCamPos.clone().sub(currentIPDOffset), 0.12);
             rightCamera.position.lerp(targetCamPos.clone().add(currentIPDOffset), 0.12);
             
@@ -374,7 +373,7 @@
             rightCamera.lookAt(lookTarget);
         }
 
-        // --- OYNANIŞ ELEMENTLERİ (HALKALAR VE BENZİN) ---
+        // --- OYNANIŞ ELEMENTLERİ (ASFALT HİZASINA GÖRE YERLEŞİM) ---
         function spawnGameplayElements(zCenter) {
             const itemCount = 3;
             for (let i = 0; i < itemCount; i++) {
@@ -382,22 +381,23 @@
                 let objGeo, objMat;
                 
                 if (!isFuel) {
-                    objGeo = new THREE.TorusGeometry(1.4, 0.15, 8, 24);
+                    objGeo = new THREE.TorusGeometry(1.2, 0.13, 8, 24);
                     objMat = new THREE.MeshStandardMaterial({ color: 0xf95738, emissive: 0xf95738, emissiveIntensity: 0.3 });
                 } else {
-                    objGeo = new THREE.BoxGeometry(1.2, 1.6, 0.6);
+                    objGeo = new THREE.BoxGeometry(1.0, 1.4, 0.6);
                     objMat = new THREE.MeshStandardMaterial({ color: 0x6a0dad, roughness: 0.4 });
                 }
 
                 const mesh = new THREE.Mesh(objGeo, objMat);
                 mesh.castShadow = true;
 
-                const x = (Math.random() - 0.5) * 30;
-                const y = 3 + Math.random() * 15;
+                // Nesneler de tam olarak uçağın uçabileceği asfalt koridorunun (-4.3 ile +4.3 arası) içinde belirir
+                const x = (Math.random() - 0.5) * 8.6;
+                const y = 2.5 + Math.random() * 12;
                 const z = zCenter - (Math.random() * segmentLength);
 
                 mesh.position.set(x, y, z);
-                mesh.userData = { isFuel: isFuel, checked: false, radius: isFuel ? 1.2 : 1.6 };
+                mesh.userData = { isFuel: isFuel, checked: false, radius: isFuel ? 1.0 : 1.4 };
 
                 environmentGroup.add(mesh);
                 activeElements.push(mesh);
@@ -451,7 +451,7 @@
             scoreTexts.forEach(txt => txt.innerText = score);
         }
 
-        // --- RETRO CHIPTUNE AUDIO ENGINE ---
+        // --- AUDIO ENGINE ---
         function initAudio() {
             audioCtx = new (window.AudioContext || window.webkitAudioContext)();
             
@@ -513,7 +513,7 @@
             osc.stop(audioCtx.currentTime + 0.3);
         }
 
-        // --- ANA DÖNGÜ ---
+        // --- MAIN LOOP ---
         function animate() {
             requestAnimationFrame(animate);
 
@@ -561,7 +561,7 @@
             document.getElementById('game-over').style.display = 'flex';
         }
 
-        // --- TETİKLEYİCİ BAŞLATICILAR ---
+        // --- BAŞLATMA VE KALİBRASYON ---
         document.getElementById('btn-start').addEventListener('click', async () => {
             const permitted = await requestSensorsPermission();
             if (!permitted) return;
@@ -579,7 +579,6 @@
             document.getElementById('btn-calibrate').style.display = 'block';
 
             init();
-            // İlk bakış duruşunu kalibre etmesi için sıfırlama matrisini çalıştır
             sensorBiasQuaternion.copy(currentQuaternion).invert();
             isPlaying = true;
             requestAnimationFrame(animate);
