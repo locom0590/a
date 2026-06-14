@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>Zen VR Biplane - Akışkan & Kısıtlı</title>
+    <title>Zen VR Biplane - Hizalanmış & Akışkan</title>
     <style>
         * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
         body, html {
@@ -101,7 +101,7 @@
         let score = 0;
         let fuel = 100;
         let isPlaying = false;
-        const speed = 0.36; // %40 azaltılmış pürüzsüz akış hızı (0.6 * 0.6)
+        const speed = 0.36; // %40 azaltılmış pürüzsüz akış hızı
         
         let airplaneGroup, propellerBlur, environmentGroup;
         let roadSegments = [], activeElements = [];
@@ -206,7 +206,7 @@
             sand.position.y = 0.01; 
             segmentGroup.add(sand);
 
-            // 10 Birim Genişliğindeki Asfalt Yol (X ekseninde -5 ile +5 arasına denk gelir)
+            // Asfalt Yol
             const roadGeo = new THREE.PlaneGeometry(10, segmentLength);
             const roadMat = new THREE.MeshStandardMaterial({ color: 0x4a4e69, roughness: 0.7 });
             const road = new THREE.Mesh(roadGeo, roadMat);
@@ -323,8 +323,13 @@
             propellerBlur.position.z = -2.82;
             airplaneGroup.add(propellerBlur);
 
+            // --- HİZALAMA DÜZELTMESİ ---
             airplaneGroup.scale.set(0.7, 0.7, 0.7);
             airplaneGroup.position.set(0, 5, 0); 
+            
+            // Uçağın ana yönünü asfalt yolun doğrultusuyla (Z ekseni yönüyle) tam olarak eşitler
+            airplaneGroup.rotation.y = Math.PI; 
+            
             scene.add(airplaneGroup);
         }
 
@@ -341,11 +346,12 @@
             currentQuaternion.slerp(calibratedTarget, SMOOTH_FACTOR);
             airplaneGroup.quaternion.copy(currentQuaternion);
 
-            const forwardVector = new THREE.Vector3(0, 0, -1).applyQuaternion(airplaneGroup.quaternion);
+            // Başlangıç rotasyonu eklendiği için uçağın yerel ileri yönü artık (0, 0, 1) vektörüdür
+            const forwardVector = new THREE.Vector3(0, 0, 1).applyQuaternion(airplaneGroup.quaternion);
             airplaneGroup.position.addScaledVector(forwardVector, speed);
 
-            // 1. KISITLAMA: Uçağın asfalt yolun (Genişlik: 10 birim, Sol: -5, Sağ: +5) dışına çıkmasını engelleme
-            const roadBoundX = 4.3; // Kanat genişliği ve tolerans payı düşülmüş güvenli X sınırı
+            // Yol Sınır Kısıtlaması (X ekseni)
+            const roadBoundX = 4.3; 
             if (airplaneGroup.position.x < -roadBoundX) airplaneGroup.position.x = -roadBoundX;
             if (airplaneGroup.position.x > roadBoundX) airplaneGroup.position.x = roadBoundX;
 
@@ -354,7 +360,7 @@
             if (airplaneGroup.position.y > 40) airplaneGroup.position.y = 40;
 
             // AKIŞKAN PÜRÜZSÜZ KAMERA TAKİBİ
-            const relativeCameraOffset = new THREE.Vector3(0, 1.6, 7.0);
+            const relativeCameraOffset = new THREE.Vector3(0, 1.6, -7.0); // Arkadan takip için Z tersine çevrildi
             const cameraOffset = relativeCameraOffset.applyQuaternion(airplaneGroup.quaternion);
             const targetCamPos = airplaneGroup.position.clone().add(cameraOffset);
             
@@ -368,7 +374,7 @@
             leftCamera.up.copy(upVector);
             rightCamera.up.copy(upVector);
             
-            const lookTarget = airplaneGroup.position.clone().add(new THREE.Vector3(0, 0, -2).applyQuaternion(airplaneGroup.quaternion));
+            const lookTarget = airplaneGroup.position.clone().add(new THREE.Vector3(0, 0, 2).applyQuaternion(airplaneGroup.quaternion));
             leftCamera.lookAt(lookTarget);
             rightCamera.lookAt(lookTarget);
         }
@@ -391,7 +397,6 @@
                 const mesh = new THREE.Mesh(objGeo, objMat);
                 mesh.castShadow = true;
 
-                // Nesneler de tam olarak uçağın uçabileceği asfalt koridorunun (-4.3 ile +4.3 arası) içinde belirir
                 const x = (Math.random() - 0.5) * 8.6;
                 const y = 2.5 + Math.random() * 12;
                 const z = zCenter - (Math.random() * segmentLength);
@@ -419,7 +424,8 @@
                 const element = activeElements[i];
                 const dist = planePos.distanceTo(element.position);
 
-                if (element.position.z > planePos.z + 10 && !element.userData.checked) {
+                // İleri yön değiştiği için Z kontrolü güncellendi
+                if (element.position.z < planePos.z - 10 && !element.userData.checked) {
                     element.userData.checked = true;
                     if (!element.userData.isFuel) updateScore(-5);
                 }
@@ -437,7 +443,7 @@
                     continue;
                 }
 
-                if (element.position.z > planePos.z + 50) {
+                if (element.position.z < planePos.z - 50) {
                     environmentGroup.remove(element);
                     activeElements.splice(i, 1);
                 }
@@ -492,7 +498,7 @@
 
         function updateAudioPitch() {
             if (!isPlaying || !motorOsc) return;
-            const dir = new THREE.Vector3(0, 0, -1).applyQuaternion(airplaneGroup.quaternion);
+            const dir = new THREE.Vector3(0, 0, 1).applyQuaternion(airplaneGroup.quaternion);
             const pitchFactor = dir.y; 
             const targetFreq = 65 + (pitchFactor * 45);
             motorOsc.frequency.setTargetAtTime(targetFreq, audioCtx.currentTime, 0.1);
